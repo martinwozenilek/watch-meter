@@ -6,6 +6,8 @@
   src: url("https://rsms.me/inter/font-files/InterVariable.woff2") format("woff2");
 }
 
+/* --- Theme variables: new colors go in both the light and dark blocks, never as literals --- */
+
 :root {
   color-scheme: light;
   --bg: radial-gradient(1200px 800px at 20% -10%, #c6cedb 0%, #b0bac9 40%, #9aa7bb 100%);
@@ -92,6 +94,8 @@
   --brand-bg: radial-gradient(circle at top, #232a34, #161b22);
 }
 
+/* --- Base --- */
+
 * {
   box-sizing: border-box;
 }
@@ -108,6 +112,8 @@ button {
   font: inherit;
   color: inherit;
 }
+
+/* --- App shell and header --- */
 
 .app {
   max-width: 1200px;
@@ -160,6 +166,8 @@ button {
   gap: 10px;
 }
 
+/* --- Buttons --- */
+
 .ghost,
 .primary {
   display: inline-flex;
@@ -184,6 +192,8 @@ button {
   box-shadow: 0 20px 40px -24px rgba(37, 99, 235, 0.9);
 }
 
+/* --- Layout --- */
+
 .layout {
   display: grid;
   grid-template-columns: minmax(280px, 360px) minmax(320px, 1fr);
@@ -195,6 +205,8 @@ button {
     grid-template-columns: 1fr;
   }
 }
+
+/* --- Panels --- */
 
 .panel {
   display: flex;
@@ -226,6 +238,8 @@ button {
   color: var(--text-subtle);
   font-size: 14px;
 }
+
+/* --- Six-position rate inputs --- */
 
 .readings-grid {
   display: grid;
@@ -264,6 +278,7 @@ button {
   box-shadow: inset 0 1px 0 var(--inset-highlight);
 }
 
+/* Tinted by showRateStatus in main.ts: green when the text parses, red when empty or unparseable. */
 .rate-input-wrap.valid {
   border-color: var(--input-valid-border);
   background: var(--input-valid-bg);
@@ -317,6 +332,8 @@ button {
   color: var(--slow);
 }
 
+/* --- Input panel footer: watch name, on-wrist drift, action buttons --- */
+
 .input-footer {
   display: flex;
   flex-direction: column;
@@ -329,6 +346,7 @@ button {
   gap: 8px;
 }
 
+/* Scoped to direct children so the on-wrist input, already boxed by .rate-input-wrap, is not double-boxed. */
 .field > input {
   padding: 9px 12px;
   border-radius: 999px;
@@ -349,6 +367,8 @@ button {
   flex-wrap: wrap;
   gap: 10px;
 }
+
+/* --- Segmented controls (axis order, view mode) --- */
 
 .chart-head {
   align-items: center;
@@ -384,6 +404,8 @@ button {
   color: var(--accent);
 }
 
+/* --- Main chart host: click or Enter opens the zoom modal --- */
+
 .chart {
   position: relative;
   display: grid;
@@ -416,6 +438,8 @@ button {
   border-radius: 18px;
   box-shadow: 0 0 0 3px var(--focus-ring);
 }
+
+/* --- Zoom modal --- */
 
 .chart-modal {
   position: fixed;
@@ -468,6 +492,8 @@ button {
   padding: 8px 14px;
   cursor: pointer;
 }
+
+/* --- Hexagon SVG parts (classes emitted by hexagon.ts) --- */
 
 .hex-ring {
   fill: none;
@@ -543,6 +569,8 @@ button {
   stroke-width: 2.6;
 }
 
+/* --- Chart caption and fast/slow area chips --- */
+
 .chart-caption {
   margin: 0;
   text-align: center;
@@ -600,6 +628,8 @@ button {
   color: var(--slow);
 }
 
+/* --- Legend --- */
+
 .legend {
   display: flex;
   flex-wrap: wrap;
@@ -632,6 +662,8 @@ button {
 .swatch-zero {
   background: var(--zero);
 }
+
+/* --- Bars fallback (bars.ts) --- */
 
 .bars-block {
   display: flex;
@@ -692,6 +724,8 @@ button {
   font-size: 11px;
   font-variant-numeric: tabular-nums;
 }
+
+/* --- Saved sessions --- */
 
 .panel-history {
   gap: 16px;
@@ -772,10 +806,14 @@ button {
   gap: 10px;
 }
 
+/* --- Footer --- */
+
 .app-footer {
   color: var(--text-subtle);
   text-align: center;
 }
+
+/* --- Toast and theme toggle icons --- */
 
 .toast {
   position: fixed;

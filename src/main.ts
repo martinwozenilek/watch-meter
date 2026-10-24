@@ -37,6 +37,7 @@ const chartModalClose = document.getElementById("chart-modal-close") as HTMLButt
 const zoneAreasEl = document.getElementById("zone-areas") as HTMLElement;
 const chartModalAreas = document.getElementById("chart-modal-areas") as HTMLElement;
 
+/** Snapshot the zoom modal re-renders from: refreshed by `updateChart`, cleared when the chart is empty. */
 let lastZoomData: {
   readings: Reading[];
   domain: Domain;
@@ -189,9 +190,12 @@ window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", (ev
 
 applyTheme(document.documentElement.dataset.theme === "dark" ? "dark" : "light");
 
+/** Saved sessions, newest first. */
 let sessions: Session[] = loadSessions();
+/** Axis order of the chart view; saved sessions always keep canonical POSITIONS order. */
 let axisOrder: AxisOrder = "sorted";
 type ViewMode = "measured" | "corrected";
+/** View-only transform: "corrected" shifts every reading so the on-wrist value reads 0. */
 let viewMode: ViewMode = "measured";
 
 const fields = new Map<Position, HTMLInputElement>();
@@ -303,6 +307,12 @@ function setChartInteractive(label: string | null): void {
   chartHost.setAttribute("aria-label", `${label} Activate to enlarge.`);
 }
 
+/**
+ * Renders the hexagon, bars and caption from the form, then snapshots the
+ * result into `lastZoomData` for the zoom modal. "Corrected" mode is a view
+ * transform: the rendered readings are shifted by the on-wrist drift, but
+ * the form inputs are never overwritten.
+ */
 function updateChart(): void {
   const readings = currentReadings();
   if (!readings) {
