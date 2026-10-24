@@ -1,4 +1,4 @@
-const CACHE = "watch-meter-v1";
+const CACHE = "watch-meter-v2";
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
