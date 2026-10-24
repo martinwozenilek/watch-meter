@@ -7,6 +7,7 @@ import {
   formatRate,
   orderReadings,
   chartDomain,
+  averageDrift,
   driftExtremes,
   driftSign,
   type AxisOrder,
@@ -338,16 +339,19 @@ function updateChart(): void {
   lastZoomData = { readings: ordered, domain, wrist: wristToShow, areas };
 
   const { fast, slow } = driftExtremes(chartReadings)!;
+  const average = averageDrift(chartReadings)!;
   const orderText = axisOrder === "sorted" ? "Axes sorted by drift" : "Axes in position order";
   const wristText =
     wristToShow !== null
       ? ` &middot; ${corrected ? "on wrist (corrected)" : "on wrist"}: ${formatRate(wristToShow)} s/d`
       : "";
-  caption.innerHTML = `${captionPrefix}${orderText} &middot; most fast: ${positionLabel(
-    fast.position,
-  )} ${formatRate(fast.drift)} &middot; most slow: ${positionLabel(
+  caption.innerHTML = `${captionPrefix}${orderText}<br />average ${formatRate(
+    average,
+  )} s/d &middot; most fast: ${positionLabel(fast.position)} ${formatRate(
+    fast.drift,
+  )} &middot; most slow: ${positionLabel(
     slow.position,
-  )} ${formatRate(slow.drift)}${wristText} &middot; range ${formatRate(domain.min)} to ${formatRate(domain.max)} s/d`;
+  )} ${formatRate(slow.drift)}${wristText}<br />range ${formatRate(domain.min)} to ${formatRate(domain.max)} s/d`;
 }
 
 function persistDraft(): void {

@@ -130,6 +130,12 @@ export function driftExtremes(readings: Reading[]): { fast: Reading; slow: Readi
   return { fast, slow };
 }
 
+/** Mean drift across the readings; null when there are none. */
+export function averageDrift(readings: Reading[]): number | null {
+  if (readings.length === 0) return null;
+  return readings.reduce((sum, reading) => sum + reading.drift, 0) / readings.length;
+}
+
 export type DriftSign = "fast" | "slow" | "flat";
 
 /** Follows `formatRate`, so a value displayed as "0" is always flat. */

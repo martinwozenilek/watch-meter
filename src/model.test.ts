@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  averageDrift,
   axisDomain,
   chartDomain,
   driftExtremes,
@@ -115,6 +116,13 @@ describe("driftExtremes", () => {
     expect(extremes?.fast.position).toBe("12up");
     expect(extremes?.slow.position).toBe("6up");
     expect(driftExtremes([])).toBeNull();
+  });
+});
+
+describe("averageDrift", () => {
+  it("averages the drifts and returns null for no readings", () => {
+    expect(averageDrift(readings)).toBeCloseTo(2 / 3);
+    expect(averageDrift([])).toBeNull();
   });
 });
 
