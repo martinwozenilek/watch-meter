@@ -12,6 +12,9 @@ const CENTER = SIZE / 2;
 const OUTER_RADIUS = 142;
 const LABEL_RADIUS = 176;
 
+/** Spline tension shared by the drawn path and every sampler; one value everywhere. */
+const CURVE_TENSION = 0.85;
+
 interface Point {
   x: number;
   y: number;
@@ -27,37 +30,73 @@ function polar(index: number, radius: number): Point {
   };
 }
 
+/** One cubic Bézier segment of the closed spline. */
+interface CurveSegment {
+  /** Segment start: the current reading. */
+  x0: number;
+  y0: number;
+  /** First control point. */
+  x1: number;
+  y1: number;
+  /** Second control point. */
+  x2: number;
+  y2: number;
+  /** Segment end: the next reading. */
+  x3: number;
+  y3: number;
+}
+
 /**
  * Closed Catmull-Rom spline converted to cubic Béziers. `tension` below 1
- * tightens the curve so it stays close to the measured points.
+ * tightens the curve so it stays close to the measured points. Derived once
+ * and shared by `smoothClosedPath` (the drawn SVG path) and `pointAt`
+ * (the samplers), so the drawn curve, the on-wrist markers and the area
+ * readout cannot drift apart.
  */
-export function smoothClosedPath(points: Point[], tension = 0.85): string {
+function curveSegments(points: Point[], tension: number): CurveSegment[] | null {
   const count = points.length;
-  if (count < 3) return "";
+  if (count < 3) return null;
 
-  let path = `M ${round(points[0].x)} ${round(points[0].y)}`;
+  const segments: CurveSegment[] = [];
   for (let i = 0; i < count; i += 1) {
     const previous = points[(i - 1 + count) % count];
     const current = points[i];
     const next = points[(i + 1) % count];
     const afterNext = points[(i + 2) % count];
 
-    const control1x = current.x + ((next.x - previous.x) * tension) / 6;
-    const control1y = current.y + ((next.y - previous.y) * tension) / 6;
-    const control2x = next.x - ((afterNext.x - current.x) * tension) / 6;
-    const control2y = next.y - ((afterNext.y - current.y) * tension) / 6;
+    segments.push({
+      x0: current.x,
+      y0: current.y,
+      x1: current.x + ((next.x - previous.x) * tension) / 6,
+      y1: current.y + ((next.y - previous.y) * tension) / 6,
+      x2: next.x - ((afterNext.x - current.x) * tension) / 6,
+      y2: next.y - ((afterNext.y - current.y) * tension) / 6,
+      x3: next.x,
+      y3: next.y,
+    });
+  }
+  return segments;
+}
 
-    path += ` C ${round(control1x)} ${round(control1y)}, ${round(control2x)} ${round(
-      control2y,
-    )}, ${round(next.x)} ${round(next.y)}`;
+/** SVG path (`M`/`C`/`Z`) of the smoothed closed spline. */
+export function smoothClosedPath(points: Point[], tension: number = CURVE_TENSION): string {
+  const segments = curveSegments(points, tension);
+  if (!segments) return "";
+
+  let path = `M ${round(segments[0].x0)} ${round(segments[0].y0)}`;
+  for (const segment of segments) {
+    path += ` C ${round(segment.x1)} ${round(segment.y1)}, ${round(segment.x2)} ${round(segment.y2)}, ${round(segment.x3)} ${round(segment.y3)}`;
   }
   return `${path} Z`;
 }
 
-/** Get a point on the smoothed closed curve at parameter t in [0,1). */
-function pointOnSmoothPath(points: Point[], t: number, tension = 0.85): Point | null {
-  const count = points.length;
-  if (count < 3) return null;
+/**
+ * Get a point on the smoothed closed curve at parameter t in [0,1), writing
+ * it into `out` so hot loops can reuse one object per pass instead of
+ * allocating per sample.
+ */
+function pointAt(segments: CurveSegment[], t: number, out: Point): Point {
+  const count = segments.length;
 
   const u = ((t % 1) + 1) % 1;
   const segment = u * count;
@@ -67,31 +106,18 @@ function pointOnSmoothPath(points: Point[], t: number, tension = 0.85): Point | 
     i = 0;
   }
 
-  const previous = points[(i - 1 + count) % count];
-  const current = points[i];
-  const next = points[(i + 1) % count];
-  const afterNext = points[(i + 2) % count];
-
-  const c1x = current.x + ((next.x - previous.x) * tension) / 6;
-  const c1y = current.y + ((next.y - previous.y) * tension) / 6;
-  const c2x = next.x - ((afterNext.x - current.x) * tension) / 6;
-  const c2y = next.y - ((afterNext.y - current.y) * tension) / 6;
+  const seg = segments[i];
 
   // Cubic Bézier: P = (1-s)^3*P0 + 3*(1-s)^2*s*P1 + 3*(1-s)*s^2*P2 + s^3*P3
-  const p0 = current;
-  const p1 = { x: c1x, y: c1y };
-  const p2 = { x: c2x, y: c2y };
-  const p3 = next;
   const s2 = s * s;
   const s3 = s2 * s;
   const mt = 1 - s;
   const mt2 = mt * mt;
   const mt3 = mt2 * mt;
 
-  return {
-    x: mt3 * p0.x + 3 * mt2 * s * p1.x + 3 * mt * s2 * p2.x + s3 * p3.x,
-    y: mt3 * p0.y + 3 * mt2 * s * p1.y + 3 * mt * s2 * p2.y + s3 * p3.y,
-  };
+  out.x = mt3 * seg.x0 + 3 * mt2 * s * seg.x1 + 3 * mt * s2 * seg.x2 + s3 * seg.x3;
+  out.y = mt3 * seg.y0 + 3 * mt2 * s * seg.y1 + 3 * mt * s2 * seg.y2 + s3 * seg.y3;
+  return out;
 }
 
 /**
@@ -104,15 +130,21 @@ export interface ZoneAreas {
   total: number;
 }
 
-/** Area samples per lap. Dense enough that the chord error is invisible. */
+/**
+ * Area samples per lap. Dense enough that the chord error is invisible.
+ * Twice PROJECTION_SAMPLES, so one pass at this density can feed both the
+ * area split and the on-wrist search.
+ */
 const AREA_SAMPLES = 1440;
 
-function cross(a: Point, b: Point): number {
-  return a.x * b.y - a.y * b.x;
+/** Cross product of two vectors: twice the signed fan-triangle area. */
+function cross(ax: number, ay: number, bx: number, by: number): number {
+  return ax * by - ay * bx;
 }
 
-function signedAngle(a: Point, b: Point): number {
-  return Math.atan2(cross(a, b), a.x * b.x + a.y * b.y);
+/** Signed angle between two vectors, in (-π, π]. */
+function signedAngle(ax: number, ay: number, bx: number, by: number): number {
+  return Math.atan2(cross(ax, ay, bx, by), ax * bx + ay * by);
 }
 
 /**
@@ -121,39 +153,92 @@ function signedAngle(a: Point, b: Point): number {
  * edge crosses the circle: inner pieces stay triangles, outer pieces become
  * circular sectors.
  */
-function triangleDiskArea(a: Point, b: Point, radius: number): number {
-  const dx = b.x - a.x;
-  const dy = b.y - a.y;
+function triangleDiskArea(ax: number, ay: number, bx: number, by: number, radius: number): number {
+  const dx = bx - ax;
+  const dy = by - ay;
   const quadA = dx * dx + dy * dy;
   if (quadA < 1e-12) return 0;
 
-  const quadB = 2 * (a.x * dx + a.y * dy);
-  const quadC = a.x * a.x + a.y * a.y - radius * radius;
+  const quadB = 2 * (ax * dx + ay * dy);
+  const quadC = ax * ax + ay * ay - radius * radius;
   const discriminant = quadB * quadB - 4 * quadA * quadC;
 
-  const stops = [0, 1];
+  // Stops where the edge splits: both ends plus any ring crossing strictly
+  // inside the edge, in ascending order. quadA > 0 puts the smaller root
+  // first, and each root is kept only when strictly inside, so the pushes
+  // stay sorted without a sort.
+  const stops = [0];
   if (discriminant > 0) {
     const root = Math.sqrt(discriminant);
-    for (const t of [(-quadB - root) / (2 * quadA), (-quadB + root) / (2 * quadA)]) {
-      if (t > 0 && t < 1) stops.push(t);
-    }
+    const low = (-quadB - root) / (2 * quadA);
+    const high = (-quadB + root) / (2 * quadA);
+    if (low > 0 && low < 1) stops.push(low);
+    if (high > 0 && high < 1) stops.push(high);
   }
-  stops.sort((left, right) => left - right);
+  stops.push(1);
 
   let area = 0;
   for (let i = 0; i < stops.length - 1; i += 1) {
     const t0 = stops[i];
     const t1 = stops[i + 1];
     if (t1 - t0 < 1e-12) continue;
-    const p0 = { x: a.x + dx * t0, y: a.y + dy * t0 };
-    const p1 = { x: a.x + dx * t1, y: a.y + dy * t1 };
-    const mid = { x: (p0.x + p1.x) / 2, y: (p0.y + p1.y) / 2 };
+    const x0 = ax + dx * t0;
+    const y0 = ay + dy * t0;
+    const x1 = ax + dx * t1;
+    const y1 = ay + dy * t1;
+    const midX = (x0 + x1) / 2;
+    const midY = (y0 + y1) / 2;
     area +=
-      Math.hypot(mid.x, mid.y) <= radius
-        ? cross(p0, p1) / 2
-        : (radius * radius * signedAngle(p0, p1)) / 2;
+      Math.sqrt(midX * midX + midY * midY) <= radius
+        ? cross(x0, y0, x1, y1) / 2
+        : (radius * radius * signedAngle(x0, y0, x1, y1)) / 2;
   }
   return area;
+}
+
+/** One lap of curve samples plus the segments they came from. */
+interface CurveSamples {
+  segments: CurveSegment[];
+  /** Sample positions relative to the chart centre. */
+  xs: Float64Array;
+  ys: Float64Array;
+}
+
+/**
+ * Sample the smoothed closed curve into flat coordinate arrays. The samples
+ * and the segments stay together: consumers that need arbitrary parameters
+ * (the marker bisection) evaluate through `pointAt`.
+ */
+function sampleCurve(points: Point[], tension: number, count: number): CurveSamples | null {
+  const segments = curveSegments(points, tension);
+  if (!segments) return null;
+
+  const xs = new Float64Array(count);
+  const ys = new Float64Array(count);
+  const scratch = { x: 0, y: 0 };
+  for (let i = 0; i < count; i += 1) {
+    pointAt(segments, i / count, scratch);
+    xs[i] = scratch.x - CENTER;
+    ys[i] = scratch.y - CENTER;
+  }
+  return { segments, xs, ys };
+}
+
+function areasFromSamples(samples: CurveSamples, zeroRadius: number): ZoneAreas {
+  const { xs, ys } = samples;
+  const count = xs.length;
+
+  let total = 0;
+  let inside = 0;
+  for (let i = 0; i < count; i += 1) {
+    const j = (i + 1) % count;
+    total += cross(xs[i], ys[i], xs[j], ys[j]) / 2;
+    inside += triangleDiskArea(xs[i], ys[i], xs[j], ys[j], zeroRadius);
+  }
+
+  const area = Math.abs(total);
+  const slow = Math.min(area, Math.abs(inside));
+  return { fast: area - slow, slow, total: area };
 }
 
 /**
@@ -161,26 +246,9 @@ function triangleDiskArea(a: Point, b: Point, radius: number): number {
  * square SVG units. The curve is sampled into a polygon; the signed fan
  * decomposition makes the ring split exact for that polygon.
  */
-export function enclosedAreas(points: Point[], zeroRadius: number, tension = 0.85): ZoneAreas {
-  const samples: Point[] = [];
-  for (let i = 0; i < AREA_SAMPLES; i += 1) {
-    const point = pointOnSmoothPath(points, i / AREA_SAMPLES, tension);
-    if (point) samples.push({ x: point.x - CENTER, y: point.y - CENTER });
-  }
-  if (samples.length < 3) return { fast: 0, slow: 0, total: 0 };
-
-  let total = 0;
-  let inside = 0;
-  for (let i = 0; i < samples.length; i += 1) {
-    const a = samples[i];
-    const b = samples[(i + 1) % samples.length];
-    total += cross(a, b) / 2;
-    inside += triangleDiskArea(a, b, zeroRadius);
-  }
-
-  const area = Math.abs(total);
-  const slow = Math.min(area, Math.abs(inside));
-  return { fast: area - slow, slow, total: area };
+export function enclosedAreas(points: Point[], zeroRadius: number, tension: number = CURVE_TENSION): ZoneAreas {
+  const samples = sampleCurve(points, tension, AREA_SAMPLES);
+  return samples ? areasFromSamples(samples, zeroRadius) : { fast: 0, slow: 0, total: 0 };
 }
 
 /** Curve samples per lap for the on-wrist search; a multiple of six so every axis point is sampled. */
@@ -193,37 +261,54 @@ const MIN_MARKER_GAP = 8;
  * outer radius. Sign changes between samples are refined by bisection; if the
  * curve never reaches the target, the single nearest point is returned.
  */
-export function projectToCurve(points: Point[], targetFraction: number, tension = 0.85): Point[] {
-  if (points.length < 3) return [];
+export function projectToCurve(points: Point[], targetFraction: number, tension: number = CURVE_TENSION): Point[] {
+  const samples = sampleCurve(points, tension, PROJECTION_SAMPLES);
+  return samples ? projectionFromSamples(samples, targetFraction) : [];
+}
 
-  const sampleAt = (t: number): { point: Point; offset: number } => {
-    const point = pointOnSmoothPath(points, t, tension)!;
-    const fraction = Math.hypot(point.x - CENTER, point.y - CENTER) / OUTER_RADIUS;
-    return { point, offset: fraction - targetFraction };
-  };
+/** The on-wrist search over a shared sampling pass. */
+function projectionFromSamples(samples: CurveSamples, targetFraction: number): Point[] {
+  const { segments, xs, ys } = samples;
+  const scratch = { x: 0, y: 0 };
 
-  const samples = Array.from({ length: PROJECTION_SAMPLES }, (_, i) => sampleAt(i / PROJECTION_SAMPLES));
+  // The pass may be denser than the search needs. Reading sample i at index
+  // i * stride hits the same curve parameter i / PROJECTION_SAMPLES, so an
+  // area-density pass (stride 2) serves the search without resampling —
+  // but the pass count must be a whole multiple of PROJECTION_SAMPLES.
+  const stride = xs.length / PROJECTION_SAMPLES;
+
+  const offsets = new Float64Array(PROJECTION_SAMPLES);
+  for (let i = 0; i < PROJECTION_SAMPLES; i += 1) {
+    const j = i * stride;
+    offsets[i] = Math.sqrt(xs[j] * xs[j] + ys[j] * ys[j]) / OUTER_RADIUS - targetFraction;
+  }
+
   const hits: Point[] = [];
-  for (let i = 0; i < samples.length; i += 1) {
-    const current = samples[i];
-    const next = samples[(i + 1) % samples.length];
-    if (Math.abs(current.offset) < 1e-9) {
-      hits.push(current.point);
-    } else if (Math.abs(next.offset) >= 1e-9 && current.offset * next.offset < 0) {
+  for (let i = 0; i < PROJECTION_SAMPLES; i += 1) {
+    const current = offsets[i];
+    const next = offsets[(i + 1) % PROJECTION_SAMPLES];
+    if (Math.abs(current) < 1e-9) {
+      const j = i * stride;
+      hits.push({ x: xs[j] + CENTER, y: ys[j] + CENTER });
+    } else if (Math.abs(next) >= 1e-9 && current * next < 0) {
       let low = i / PROJECTION_SAMPLES;
       let high = (i + 1) / PROJECTION_SAMPLES;
-      let lowOffset = current.offset;
+      let lowOffset = current;
       for (let step = 0; step < 20; step += 1) {
         const mid = (low + high) / 2;
-        const sample = sampleAt(mid);
-        if (sample.offset * lowOffset > 0) {
+        pointAt(segments, mid, scratch);
+        const relX = scratch.x - CENTER;
+        const relY = scratch.y - CENTER;
+        const offset = Math.sqrt(relX * relX + relY * relY) / OUTER_RADIUS - targetFraction;
+        if (offset * lowOffset > 0) {
           low = mid;
-          lowOffset = sample.offset;
+          lowOffset = offset;
         } else {
           high = mid;
         }
       }
-      hits.push(sampleAt((low + high) / 2).point);
+      pointAt(segments, (low + high) / 2, scratch);
+      hits.push({ x: scratch.x, y: scratch.y });
     }
   }
 
@@ -235,11 +320,12 @@ export function projectToCurve(points: Point[], targetFraction: number, tension 
   }
   if (markers.length > 0) return markers;
 
-  let best = samples[0];
-  for (const sample of samples) {
-    if (Math.abs(sample.offset) < Math.abs(best.offset)) best = sample;
+  let best = 0;
+  for (let i = 1; i < PROJECTION_SAMPLES; i += 1) {
+    if (Math.abs(offsets[i]) < Math.abs(offsets[best])) best = i;
   }
-  return [best.point];
+  const bestJ = best * stride;
+  return [{ x: xs[bestJ] + CENTER, y: ys[bestJ] + CENTER }];
 }
 
 // The main chart, the zoom modal and every history thumbnail render on the
@@ -265,6 +351,18 @@ export function renderHexagon(
   const points = readings.map((reading, index) => polar(index, radiusOf(reading.drift)));
   const path = smoothClosedPath(points);
 
+  const wristValue = wristDrift ?? null;
+  const wantsAreas = options.areas !== false;
+
+  // One sampling pass feeds both the on-wrist markers and the area split.
+  // At area density (twice the projection density) the on-wrist search
+  // reads every other sample, so a wrist value costs no second pass;
+  // thumbnails skip the split, so their pass runs at projection density.
+  const samples =
+    wristValue !== null || wantsAreas
+      ? sampleCurve(points, CURVE_TENSION, wantsAreas ? AREA_SAMPLES : PROJECTION_SAMPLES)
+      : null;
+
   const summary = readings
     .map((reading) => `${positionLabel(reading.position)} ${formatRate(reading.drift)}`)
     .join(", ");
@@ -273,7 +371,7 @@ export function renderHexagon(
   const clipId = `wm-hex-clip-${clipIdCounter}`;
 
   const parts: string[] = [];
-  const wristLabel = wristDrift !== undefined && wristDrift !== null ? `, on wrist ${formatRate(wristDrift)} s/d` : "";
+  const wristLabel = wristValue !== null ? `, on wrist ${formatRate(wristValue)} s/d` : "";
   parts.push(
     `<svg viewBox="0 0 ${SIZE} ${SIZE}" role="img" aria-label="Position signature. ${summary}${wristLabel}, in seconds per day.">`,
   );
@@ -331,9 +429,9 @@ export function renderHexagon(
   }
 
   // On-wrist measurement, marked everywhere the smoothed curve reaches it.
-  if (wristDrift !== undefined && wristDrift !== null) {
-    const targetFraction = radialFraction(wristDrift, domain);
-    for (const wristPoint of projectToCurve(points, targetFraction)) {
+  if (wristValue !== null && samples) {
+    const targetFraction = radialFraction(wristValue, domain);
+    for (const wristPoint of projectionFromSamples(samples, targetFraction)) {
       parts.push(
         `<circle cx="${round(wristPoint.x)}" cy="${round(wristPoint.y)}" r="7" class="hex-wrist" />`,
       );
@@ -364,11 +462,11 @@ export function renderHexagon(
 
   parts.push("</svg>");
   host.innerHTML = parts.join("");
-  if (options.areas === false) return null;
+  if (!wantsAreas) return null;
 
   // Convert square SVG units to (s/d)²: one outer radius spans the whole range.
   const ratePerPixel = (domain.max - domain.min) / OUTER_RADIUS;
   const scale = ratePerPixel * ratePerPixel;
-  const px = enclosedAreas(points, zeroRadius);
+  const px = samples ? areasFromSamples(samples, zeroRadius) : { fast: 0, slow: 0, total: 0 };
   return { fast: px.fast * scale, slow: px.slow * scale, total: px.total * scale };
 }

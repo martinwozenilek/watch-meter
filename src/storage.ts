@@ -9,6 +9,11 @@ export interface Draft {
   wrist?: string;
 }
 
+/**
+ * The only validation for stored and imported sessions. It checks the fields
+ * it knows and passes the object through unchanged, so a new session field
+ * is accepted with any value until a type check is added here.
+ */
 export function isSession(value: unknown): value is Session {
   if (!value || typeof value !== "object") return false;
   const session = value as Partial<Session>;
@@ -105,6 +110,10 @@ export function saveSessions(sessions: Session[]): void {
   }
 }
 
+/**
+ * Restores a saved draft. Known fields are copied one by one, so a new form
+ * field must be added to `Draft` and here, or it is not restored on reload.
+ */
 export function loadDraft(): Draft | null {
   try {
     const raw = localStorage.getItem(DRAFT_KEY);

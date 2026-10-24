@@ -1,13 +1,13 @@
 # Watch Meter
 
-A single-page visualizer for six-position mechanical watch rate measurements. Enter how many seconds per day a watch gains or loses in each position and see the shape of its rate signature: a smoothed hexagon where the zero ring sits halfway out, so fast positions bulge outward and slow positions dip inward.
+A single-page visualizer for six-position mechanical watch rate measurements. Enter how many seconds per day a watch gains or loses in each position and see the shape of its rate signature: a smoothed hexagon where the zero ring sits wherever zero falls in the chart's range, so fast positions bulge outward and slow positions dip inward.
 
 Everything runs in the browser. There is no backend, no account, and no chart library — the hexagon and the bar chart are hand-rolled SVG. Your data lives in `localStorage` and in JSON files you export yourself.
 
 ## Features
 
 - **Six positions** — dial down, dial up, 12 up, 3 up, 6 up, 9 up, in signed seconds per day (positive = running fast).
-- **Rate signature hexagon** — one axis per position, connected by a closed Catmull-Rom curve, with a zero ring at mid-radius.
+- **Rate signature hexagon** — one axis per position, connected by a closed Catmull-Rom curve, with a zero ring that sits wherever zero falls in the chart's range.
 - **Two axis orders** — "By drift" sorts the most positive position to the top; "Positions" uses the physical layout (12, 3, 6, 9, dial down, dial up). Sorting is view-only and never changes saved data.
 - **Correct to 0 on wrist** — a view transform that subtracts your on-wrist drift from all six positions, so you can see the signature as it would look if the watch averaged exactly zero on the wrist. Inputs are not modified.
 - **On-wrist marker** — the daily-wear value is marked on the smoothed curve, not on an axis, at every place the drawn shape reaches that value (or at the nearest point if it never does).
