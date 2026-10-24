@@ -12,6 +12,9 @@ const CENTER = SIZE / 2;
 const OUTER_RADIUS = 142;
 const LABEL_RADIUS = 176;
 
+/** Spline tension shared by the drawn path and every sampler; one value everywhere. */
+const CURVE_TENSION = 0.85;
+
 interface Point {
   x: number;
   y: number;
@@ -27,37 +30,69 @@ function polar(index: number, radius: number): Point {
   };
 }
 
+/** One cubic Bézier segment of the closed spline. */
+interface CurveSegment {
+  /** Segment start: the current reading. */
+  x0: number;
+  y0: number;
+  /** First control point. */
+  x1: number;
+  y1: number;
+  /** Second control point. */
+  x2: number;
+  y2: number;
+  /** Segment end: the next reading. */
+  x3: number;
+  y3: number;
+}
+
 /**
  * Closed Catmull-Rom spline converted to cubic Béziers. `tension` below 1
- * tightens the curve so it stays close to the measured points.
+ * tightens the curve so it stays close to the measured points. Derived once
+ * and shared by `smoothClosedPath` (the drawn SVG path) and `pointOnSmoothPath`
+ * (the samplers), so the drawn curve, the on-wrist markers and the area
+ * readout cannot drift apart.
  */
-export function smoothClosedPath(points: Point[], tension = 0.85): string {
+function curveSegments(points: Point[], tension: number): CurveSegment[] | null {
   const count = points.length;
-  if (count < 3) return "";
+  if (count < 3) return null;
 
-  let path = `M ${round(points[0].x)} ${round(points[0].y)}`;
+  const segments: CurveSegment[] = [];
   for (let i = 0; i < count; i += 1) {
     const previous = points[(i - 1 + count) % count];
     const current = points[i];
     const next = points[(i + 1) % count];
     const afterNext = points[(i + 2) % count];
 
-    const control1x = current.x + ((next.x - previous.x) * tension) / 6;
-    const control1y = current.y + ((next.y - previous.y) * tension) / 6;
-    const control2x = next.x - ((afterNext.x - current.x) * tension) / 6;
-    const control2y = next.y - ((afterNext.y - current.y) * tension) / 6;
+    segments.push({
+      x0: current.x,
+      y0: current.y,
+      x1: current.x + ((next.x - previous.x) * tension) / 6,
+      y1: current.y + ((next.y - previous.y) * tension) / 6,
+      x2: next.x - ((afterNext.x - current.x) * tension) / 6,
+      y2: next.y - ((afterNext.y - current.y) * tension) / 6,
+      x3: next.x,
+      y3: next.y,
+    });
+  }
+  return segments;
+}
 
-    path += ` C ${round(control1x)} ${round(control1y)}, ${round(control2x)} ${round(
-      control2y,
-    )}, ${round(next.x)} ${round(next.y)}`;
+/** SVG path (`M`/`C`/`Z`) of the smoothed closed spline. */
+export function smoothClosedPath(points: Point[], tension: number = CURVE_TENSION): string {
+  const segments = curveSegments(points, tension);
+  if (!segments) return "";
+
+  let path = `M ${round(segments[0].x0)} ${round(segments[0].y0)}`;
+  for (const segment of segments) {
+    path += ` C ${round(segment.x1)} ${round(segment.y1)}, ${round(segment.x2)} ${round(segment.y2)}, ${round(segment.x3)} ${round(segment.y3)}`;
   }
   return `${path} Z`;
 }
 
 /** Get a point on the smoothed closed curve at parameter t in [0,1). */
-function pointOnSmoothPath(points: Point[], t: number, tension = 0.85): Point | null {
-  const count = points.length;
-  if (count < 3) return null;
+function pointOnSmoothPath(segments: CurveSegment[], t: number): Point {
+  const count = segments.length;
 
   const u = ((t % 1) + 1) % 1;
   const segment = u * count;
@@ -67,21 +102,9 @@ function pointOnSmoothPath(points: Point[], t: number, tension = 0.85): Point | 
     i = 0;
   }
 
-  const previous = points[(i - 1 + count) % count];
-  const current = points[i];
-  const next = points[(i + 1) % count];
-  const afterNext = points[(i + 2) % count];
-
-  const c1x = current.x + ((next.x - previous.x) * tension) / 6;
-  const c1y = current.y + ((next.y - previous.y) * tension) / 6;
-  const c2x = next.x - ((afterNext.x - current.x) * tension) / 6;
-  const c2y = next.y - ((afterNext.y - current.y) * tension) / 6;
+  const seg = segments[i];
 
   // Cubic Bézier: P = (1-s)^3*P0 + 3*(1-s)^2*s*P1 + 3*(1-s)*s^2*P2 + s^3*P3
-  const p0 = current;
-  const p1 = { x: c1x, y: c1y };
-  const p2 = { x: c2x, y: c2y };
-  const p3 = next;
   const s2 = s * s;
   const s3 = s2 * s;
   const mt = 1 - s;
@@ -89,8 +112,8 @@ function pointOnSmoothPath(points: Point[], t: number, tension = 0.85): Point | 
   const mt3 = mt2 * mt;
 
   return {
-    x: mt3 * p0.x + 3 * mt2 * s * p1.x + 3 * mt * s2 * p2.x + s3 * p3.x,
-    y: mt3 * p0.y + 3 * mt2 * s * p1.y + 3 * mt * s2 * p2.y + s3 * p3.y,
+    x: mt3 * seg.x0 + 3 * mt2 * s * seg.x1 + 3 * mt * s2 * seg.x2 + s3 * seg.x3,
+    y: mt3 * seg.y0 + 3 * mt2 * s * seg.y1 + 3 * mt * s2 * seg.y2 + s3 * seg.y3,
   };
 }
 
@@ -161,13 +184,15 @@ function triangleDiskArea(a: Point, b: Point, radius: number): number {
  * square SVG units. The curve is sampled into a polygon; the signed fan
  * decomposition makes the ring split exact for that polygon.
  */
-export function enclosedAreas(points: Point[], zeroRadius: number, tension = 0.85): ZoneAreas {
+export function enclosedAreas(points: Point[], zeroRadius: number, tension: number = CURVE_TENSION): ZoneAreas {
+  const segments = curveSegments(points, tension);
+  if (!segments) return { fast: 0, slow: 0, total: 0 };
+
   const samples: Point[] = [];
   for (let i = 0; i < AREA_SAMPLES; i += 1) {
-    const point = pointOnSmoothPath(points, i / AREA_SAMPLES, tension);
-    if (point) samples.push({ x: point.x - CENTER, y: point.y - CENTER });
+    const point = pointOnSmoothPath(segments, i / AREA_SAMPLES);
+    samples.push({ x: point.x - CENTER, y: point.y - CENTER });
   }
-  if (samples.length < 3) return { fast: 0, slow: 0, total: 0 };
 
   let total = 0;
   let inside = 0;
@@ -193,11 +218,14 @@ const MIN_MARKER_GAP = 8;
  * outer radius. Sign changes between samples are refined by bisection; if the
  * curve never reaches the target, the single nearest point is returned.
  */
-export function projectToCurve(points: Point[], targetFraction: number, tension = 0.85): Point[] {
+export function projectToCurve(points: Point[], targetFraction: number, tension: number = CURVE_TENSION): Point[] {
   if (points.length < 3) return [];
 
+  const segments = curveSegments(points, tension);
+  if (!segments) return [];
+
   const sampleAt = (t: number): { point: Point; offset: number } => {
-    const point = pointOnSmoothPath(points, t, tension)!;
+    const point = pointOnSmoothPath(segments, t);
     const fraction = Math.hypot(point.x - CENTER, point.y - CENTER) / OUTER_RADIUS;
     return { point, offset: fraction - targetFraction };
   };
