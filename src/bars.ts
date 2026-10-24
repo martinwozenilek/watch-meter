@@ -1,4 +1,4 @@
-import { driftSign, formatRate, positionLabel, type Reading } from "./model";
+import { driftSign, formatRate, positionLabel, type Domain, type Reading } from "./model";
 
 const WIDTH = 520;
 const ROW_HEIGHT = 30;
@@ -8,15 +8,15 @@ const LABEL_WIDTH = 96;
 const VALUE_WIDTH = 72;
 const BAR_LEFT = LABEL_WIDTH + 14;
 const BAR_RIGHT = WIDTH - VALUE_WIDTH;
-const ZERO_X = (BAR_LEFT + BAR_RIGHT) / 2;
-const HALF_WIDTH = (BAR_RIGHT - BAR_LEFT) / 2;
 
 const round = (value: number): string => String(Math.round(value * 100) / 100);
 
-export function renderBars(host: HTMLElement, readings: Reading[], domain: number): void {
+export function renderBars(host: HTMLElement, readings: Reading[], domain: Domain): void {
   const height = TOP + readings.length * ROW_HEIGHT + BOTTOM;
+  const span = domain.max - domain.min;
   const xFor = (drift: number): number =>
-    ZERO_X + (Math.max(-domain, Math.min(domain, drift)) / domain) * HALF_WIDTH;
+    BAR_LEFT + ((Math.max(domain.min, Math.min(domain.max, drift)) - domain.min) / span) * (BAR_RIGHT - BAR_LEFT);
+  const zeroX = xFor(0);
 
   const summary = readings
     .map((reading) => `${positionLabel(reading.position)} ${formatRate(reading.drift)}`)
@@ -29,7 +29,7 @@ export function renderBars(host: HTMLElement, readings: Reading[], domain: numbe
 
   // Zero line.
   parts.push(
-    `<line x1="${round(ZERO_X)}" y1="${TOP - 4}" x2="${round(ZERO_X)}" y2="${round(
+    `<line x1="${round(zeroX)}" y1="${TOP - 4}" x2="${round(zeroX)}" y2="${round(
       TOP + readings.length * ROW_HEIGHT + 4,
     )}" class="bar-zero" />`,
   );
@@ -38,10 +38,10 @@ export function renderBars(host: HTMLElement, readings: Reading[], domain: numbe
     const centerY = TOP + index * ROW_HEIGHT + ROW_HEIGHT / 2;
     const barTop = centerY - 7;
     const tip = xFor(reading.drift);
-    const length = Math.abs(tip - ZERO_X);
+    const length = Math.abs(tip - zeroX);
     // Bars too short to see get a 2px stub centred on zero, whatever their sign.
     const width = Math.max(2, length);
-    const barLeft = length < 2 ? ZERO_X - 1 : Math.min(ZERO_X, tip);
+    const barLeft = length < 2 ? zeroX - 1 : Math.min(zeroX, tip);
 
     parts.push(
       `<text x="${LABEL_WIDTH}" y="${round(centerY)}" class="bar-label" text-anchor="end" ` +
@@ -60,7 +60,7 @@ export function renderBars(host: HTMLElement, readings: Reading[], domain: numbe
 
   // Scale.
   const scaleY = height - 9;
-  for (const value of [-domain, 0, domain]) {
+  for (const value of [...new Set([domain.min, 0, domain.max])]) {
     parts.push(
       `<text x="${round(xFor(value))}" y="${scaleY}" class="bar-scale" text-anchor="middle">${formatRate(
         value,

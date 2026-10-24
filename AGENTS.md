@@ -13,7 +13,7 @@ Client-only single-page app: six-position watch rate visualizer. No backend, no 
 
 - `index.html` — static shell only; no router, everything is one page.
 - `src/main.ts` — all DOM wiring, module-level state, draft/session persistence, export/import, zoom modal.
-- `src/model.ts` — pure domain layer: parse/format rates, axis ordering, symmetric domain, `radialFraction`. Keep math here; it is the only easily testable layer.
+- `src/model.ts` — pure domain layer: parse/format rates, axis ordering, chart domain, `radialFraction`. Keep math here; it is the only easily testable layer.
 - `src/hexagon.ts` — SVG radar chart, Catmull-Rom smoothing, on-wrist point projection.
 - `src/bars.ts` — SVG signed bar fallback.
 - `src/storage.ts` — localStorage (`watch-meter:sessions:v1`, `watch-meter:draft:v1`), `isSession` validation, and `importSessions` (merge for JSON import).
@@ -21,10 +21,10 @@ Client-only single-page app: six-position watch rate visualizer. No backend, no 
 ## Domain rules that are easy to break
 
 - Rates are signed seconds/day; positive means fast.
-- The radial scale is symmetric `[-domain, +domain]`: center is `-domain`, the outer edge is `+domain`, so the zero ring is always at 50% radius. Use `radialFraction()`; do not invent another mapping.
+- The radial scale is `[domain.min, domain.max]` from `chartDomain()`: center is `min`, outer edge is `max`, `min <= 0 <= max`. Each side is rounded up to a nice number separately, and a side with no values is 0, so with no negative values zero sits at the center (and with no positive values, on the outer edge). The zero ring therefore moves; never assume 50% radius. Use `radialFraction()`; do not invent another mapping. Bars use the same range.
 - "By drift" sorts axes descending; "Positions" uses `FIXED_AXIS_ORDER` (12, 3, 6, 9, dial down, dial up). Sorting is view-only — saved sessions keep canonical `POSITIONS` order.
 - "Correct to 0 on wrist" is a view transform (`drift - wristDrift` for all six positions); it must not overwrite the inputs.
-- The on-wrist value is projected onto the smoothed curve by nearest radial fraction (`projectToCurve`), not onto an axis. If you change the curve, change `pointOnSmoothPath`/`projectToCurve` with it.
+- The on-wrist value is marked on the smoothed curve, not on an axis: `projectToCurve` returns every point where the curve reaches its radial fraction, or the single nearest point if the curve never reaches it. If you change the curve, change `pointOnSmoothPath`/`projectToCurve` with it.
 - The fast/slow area readout under the chart comes from `enclosedAreas()` in `hexagon.ts`: it samples the same smoothed curve and splits the enclosed region at the zero ring. `renderHexagon()` returns the split in (s/d)², or `null` when called with `{ areas: false }` (thumbnails and the zoom modal, which reuses the main chart's result); the UI shows each half as a share of the total. Change the curve and the areas follow — do not re-derive them elsewhere.
 
 ## Gotchas

@@ -11,6 +11,7 @@ import {
   driftSign,
   type AxisOrder,
   type Position,
+  type Domain,
   type Reading,
   type Session,
 } from "./model";
@@ -37,7 +38,7 @@ const chartModalAreas = document.getElementById("chart-modal-areas") as HTMLElem
 
 let lastZoomData: {
   readings: Reading[];
-  domain: number;
+  domain: Domain;
   wrist: number | null;
   areas: ZoneAreas | null;
 } | null = null;
@@ -346,7 +347,7 @@ function updateChart(): void {
     fast.position,
   )} ${formatRate(fast.drift)} &middot; most slow: ${positionLabel(
     slow.position,
-  )} ${formatRate(slow.drift)}${wristText} &middot; domain ±${formatRate(domain)} s/d`;
+  )} ${formatRate(slow.drift)}${wristText} &middot; range ${formatRate(domain.min)} to ${formatRate(domain.max)} s/d`;
 }
 
 function persistDraft(): void {

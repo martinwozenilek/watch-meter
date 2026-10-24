@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { enclosedAreas } from "./hexagon";
+import { enclosedAreas, projectToCurve } from "./hexagon";
 
 const CENTER = 240;
 
@@ -48,5 +48,34 @@ describe("enclosedAreas", () => {
 
   it("returns zero areas for degenerate input", () => {
     expect(enclosedAreas([], 10)).toEqual({ fast: 0, slow: 0, total: 0 });
+  });
+});
+
+describe("projectToCurve", () => {
+  const radiusOf = (point: { x: number; y: number }): number =>
+    Math.hypot(point.x - CENTER, point.y - CENTER);
+
+  it("marks every place the curve crosses the target radius", () => {
+    // Alternating 40/100 radii: the curve crosses 70 twice per lobe, six times in all.
+    const points = Array.from({ length: 6 }, (_, index) => {
+      const angle = (-90 + index * 60) * (Math.PI / 180);
+      const radius = index % 2 === 0 ? 100 : 40;
+      return { x: CENTER + Math.cos(angle) * radius, y: CENTER + Math.sin(angle) * radius };
+    });
+    const hits = projectToCurve(points, 70 / 142);
+
+    expect(hits).toHaveLength(6);
+    for (const hit of hits) expect(radiusOf(hit)).toBeCloseTo(70, 3);
+  });
+
+  it("falls back to the nearest point when the curve never reaches the target", () => {
+    const hits = projectToCurve(onCircle(60), 1);
+
+    expect(hits).toHaveLength(1);
+    expect(radiusOf(hits[0])).toBeGreaterThan(60);
+  });
+
+  it("returns nothing for degenerate input", () => {
+    expect(projectToCurve([], 0.5)).toEqual([]);
   });
 });

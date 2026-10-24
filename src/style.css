@@ -34,7 +34,7 @@
   --hex-panel: rgba(255, 255, 255, 0.9);
   --hex-fast-fill: rgba(37, 99, 235, 0.14);
   --hex-slow-fill: rgba(220, 38, 38, 0.12);
-  --wrist-fill: #111111;
+  --wrist-fill: #f97316;
   --wrist-stroke: #ffffff;
   --bar-fast: rgba(37, 99, 235, 0.8);
   --bar-slow: rgba(220, 38, 38, 0.8);
@@ -73,7 +73,7 @@
   --hex-panel: rgba(16, 20, 26, 0.94);
   --hex-fast-fill: rgba(138, 180, 255, 0.18);
   --hex-slow-fill: rgba(255, 129, 119, 0.16);
-  --wrist-fill: #f2f6ff;
+  --wrist-fill: #fb923c;
   --wrist-stroke: #10141a;
   --bar-fast: rgba(138, 180, 255, 0.85);
   --bar-slow: rgba(255, 129, 119, 0.85);
@@ -523,24 +523,6 @@ button {
   fill: var(--wrist-fill);
   stroke: var(--wrist-stroke);
   stroke-width: 2.6;
-}
-
-.hex-wrist-label {
-  fill: var(--text);
-  font-size: 12px;
-  font-variant-numeric: tabular-nums;
-}
-
-.hex-wrist-label.fast {
-  fill: var(--fast);
-}
-
-.hex-wrist-label.slow {
-  fill: var(--slow);
-}
-
-.hex-wrist-label.flat {
-  fill: var(--text-subtle);
 }
 
 .chart-caption {

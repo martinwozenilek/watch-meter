@@ -84,11 +84,7 @@ export function orderReadings(readings: Reading[], order: AxisOrder): Reading[] 
 
 const NICE_STEPS = [1, 1.2, 1.5, 2, 2.5, 3, 4, 5, 6, 8, 10];
 
-/**
- * Symmetric radial domain: the chart spans [-domain, +domain] with zero
- * exactly halfway out. The domain is the smallest "nice" number above the
- * largest absolute drift.
- */
+/** The smallest "nice" number at or above the largest absolute value; 1 when all are zero. */
 export function axisDomain(values: number[]): number {
   const maxAbs = values.reduce((max, value) => Math.max(max, Math.abs(value)), 0);
   if (maxAbs === 0 || !Number.isFinite(maxAbs)) return 1;
@@ -99,11 +95,27 @@ export function axisDomain(values: number[]): number {
   return step * magnitude;
 }
 
+/**
+ * Radial range of a chart: the centre is `min`, the outer edge is `max`, and
+ * `min <= 0 <= max`. Each side is rounded up to a nice number on its own; a
+ * side with no values collapses to 0, so zero sits on the centre or the edge.
+ */
+export interface Domain {
+  min: number;
+  max: number;
+}
+
 /** Domain for a chart: covers every reading and the on-wrist value, if any. */
-export function chartDomain(readings: Reading[], wristDrift?: number | null): number {
+export function chartDomain(readings: Reading[], wristDrift?: number | null): Domain {
   const values = readings.map((reading) => reading.drift);
   if (wristDrift !== undefined && wristDrift !== null) values.push(wristDrift);
-  return axisDomain(values);
+  const fastest = values.reduce((max, value) => Math.max(max, value), 0);
+  const slowest = values.reduce((min, value) => Math.min(min, value), 0);
+  if (fastest === 0 && slowest === 0) return { min: -1, max: 1 };
+  return {
+    min: slowest < 0 ? -axisDomain([slowest]) : 0,
+    max: fastest > 0 ? axisDomain([fastest]) : 0,
+  };
 }
 
 /** Fastest and slowest reading, independent of axis order. Ties keep the input order. */
@@ -127,8 +139,9 @@ export function driftSign(drift: number): DriftSign {
   return formatted.startsWith("-") ? "slow" : "fast";
 }
 
-/** 0 at the centre (−domain), 0.5 on the zero ring, 1 at the outer edge (+domain). */
-export function radialFraction(drift: number, domain: number): number {
-  if (!(domain > 0)) return 0.5;
-  return Math.min(1, Math.max(0, (drift + domain) / (2 * domain)));
+/** 0 at the centre (`domain.min`), 1 at the outer edge (`domain.max`). */
+export function radialFraction(drift: number, domain: Domain): number {
+  const span = domain.max - domain.min;
+  if (!(span > 0)) return 0.5;
+  return Math.min(1, Math.max(0, (drift - domain.min) / span));
 }

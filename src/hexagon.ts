@@ -3,6 +3,7 @@ import {
   formatRate,
   positionLabel,
   radialFraction,
+  type Domain,
   type Reading,
 } from "./model";
 
@@ -182,30 +183,64 @@ export function enclosedAreas(points: Point[], zeroRadius: number, tension = 0.8
   return { fast: area - slow, slow, total: area };
 }
 
-/** Find the point on the smoothed curve with radial fraction closest to target (0-1). */
-function projectToCurve(
-  points: Point[],
-  targetFraction: number,
-  tension = 0.85,
-): Point | null {
-  const center = { x: CENTER, y: CENTER };
-  let best: { point: Point; error: number } | null = null;
+/** Curve samples per lap for the on-wrist search; a multiple of six so every axis point is sampled. */
+const PROJECTION_SAMPLES = 720;
+/** Crossings closer than this (SVG units) are one marker. */
+const MIN_MARKER_GAP = 8;
 
-  for (let t = 0; t < 1; t += 1 / 240) {
-    const point = pointOnSmoothPath(points, t, tension);
-    if (!point) continue;
-    const vx = point.x - center.x;
-    const vy = point.y - center.y;
-    const fraction = Math.sqrt(vx * vx + vy * vy) / OUTER_RADIUS;
-    const error = Math.abs(fraction - targetFraction);
-    if (!best || error < best.error) {
-      best = { point, error };
+/**
+ * Every point where the smoothed curve sits at `targetFraction` (0-1) of the
+ * outer radius. Sign changes between samples are refined by bisection; if the
+ * curve never reaches the target, the single nearest point is returned.
+ */
+export function projectToCurve(points: Point[], targetFraction: number, tension = 0.85): Point[] {
+  if (points.length < 3) return [];
+
+  const sampleAt = (t: number): { point: Point; offset: number } => {
+    const point = pointOnSmoothPath(points, t, tension)!;
+    const fraction = Math.hypot(point.x - CENTER, point.y - CENTER) / OUTER_RADIUS;
+    return { point, offset: fraction - targetFraction };
+  };
+
+  const samples = Array.from({ length: PROJECTION_SAMPLES }, (_, i) => sampleAt(i / PROJECTION_SAMPLES));
+  const hits: Point[] = [];
+  for (let i = 0; i < samples.length; i += 1) {
+    const current = samples[i];
+    const next = samples[(i + 1) % samples.length];
+    if (Math.abs(current.offset) < 1e-9) {
+      hits.push(current.point);
+    } else if (Math.abs(next.offset) >= 1e-9 && current.offset * next.offset < 0) {
+      let low = i / PROJECTION_SAMPLES;
+      let high = (i + 1) / PROJECTION_SAMPLES;
+      let lowOffset = current.offset;
+      for (let step = 0; step < 20; step += 1) {
+        const mid = (low + high) / 2;
+        const sample = sampleAt(mid);
+        if (sample.offset * lowOffset > 0) {
+          low = mid;
+          lowOffset = sample.offset;
+        } else {
+          high = mid;
+        }
+      }
+      hits.push(sampleAt((low + high) / 2).point);
     }
   }
-  return best?.point ?? null;
-}
 
-const TICK_FRACTIONS = [-0.5, 0, 0.5, 1];
+  const markers: Point[] = [];
+  for (const hit of hits) {
+    if (markers.every((marker) => Math.hypot(marker.x - hit.x, marker.y - hit.y) >= MIN_MARKER_GAP)) {
+      markers.push(hit);
+    }
+  }
+  if (markers.length > 0) return markers;
+
+  let best = samples[0];
+  for (const sample of samples) {
+    if (Math.abs(sample.offset) < Math.abs(best.offset)) best = sample;
+  }
+  return [best.point];
+}
 
 // The main chart, the zoom modal and every history thumbnail render on the
 // same page, so each SVG needs its own clip-path id.
@@ -219,7 +254,7 @@ export interface RenderHexagonOptions {
 export function renderHexagon(
   host: HTMLElement,
   readings: Reading[],
-  domain: number,
+  domain: Domain,
   wristDrift?: number | null,
   options: RenderHexagonOptions = {},
 ): ZoneAreas | null {
@@ -255,11 +290,13 @@ export function renderHexagon(
       `</g>`,
   );
 
-  // Rings, one per half-domain step.
-  for (const fraction of [-1, -0.5, 0, 0.5, 1]) {
-    const radius = radiusOf(fraction * domain);
+  // Rings at each end of the range, halfway to zero on each side, and zero itself.
+  // A side with no values has min or max at 0, so its rings coincide with zero.
+  const distinct = (values: number[]): number[] => [...new Set(values)];
+  for (const value of distinct([domain.min, domain.min / 2, 0, domain.max / 2, domain.max])) {
+    const radius = radiusOf(value);
     if (radius < 0.5) continue;
-    const className = fraction === 0 ? "hex-ring hex-zero" : "hex-ring";
+    const className = value === 0 ? "hex-ring hex-zero" : "hex-ring";
     parts.push(
       `<circle cx="${CENTER}" cy="${CENTER}" r="${round(radius)}" class="${className}" />`,
     );
@@ -276,11 +313,12 @@ export function renderHexagon(
   }
 
   // Radial scale, labelled along the 12 o'clock spoke.
-  for (const fraction of TICK_FRACTIONS) {
-    const radius = radiusOf(fraction * domain);
+  // The centre is left unlabelled unless it is zero.
+  for (const value of distinct([domain.min / 2, 0, domain.max / 2, domain.max])) {
+    const radius = radiusOf(value);
     parts.push(
       `<text x="${CENTER + 7}" y="${round(CENTER - radius)}" class="hex-tick" ` +
-        `dominant-baseline="middle">${formatRate(fraction * domain)}</text>`,
+        `dominant-baseline="middle">${formatRate(value)}</text>`,
     );
   }
 
@@ -292,21 +330,12 @@ export function renderHexagon(
     );
   }
 
-  // On-wrist measurement placed on the smoothed curve.
+  // On-wrist measurement, marked everywhere the smoothed curve reaches it.
   if (wristDrift !== undefined && wristDrift !== null) {
     const targetFraction = radialFraction(wristDrift, domain);
-    const wristPoint = projectToCurve(points, targetFraction);
-    if (wristPoint) {
+    for (const wristPoint of projectToCurve(points, targetFraction)) {
       parts.push(
-        `<circle cx="${round(wristPoint.x)}" cy="${round(wristPoint.y)}" r="5.2" class="hex-wrist" />`,
-      );
-      const wristAnchorX = wristPoint.x + (wristPoint.x - CENTER) * 0.18;
-      const wristAnchorY = wristPoint.y + (wristPoint.y - CENTER) * 0.18;
-      parts.push(
-        `<text x="${round(wristAnchorX)}" y="${round(wristAnchorY)}" class="hex-wrist-label ${driftSign(
-          wristDrift,
-        )}" text-anchor="middle" dominant-baseline="middle">` +
-          `on wrist ${formatRate(wristDrift)}</text>`,
+        `<circle cx="${round(wristPoint.x)}" cy="${round(wristPoint.y)}" r="7" class="hex-wrist" />`,
       );
     }
   }
@@ -337,8 +366,8 @@ export function renderHexagon(
   host.innerHTML = parts.join("");
   if (options.areas === false) return null;
 
-  // Convert square SVG units to (s/d)²: one outer radius spans 2 × domain.
-  const ratePerPixel = (2 * domain) / OUTER_RADIUS;
+  // Convert square SVG units to (s/d)²: one outer radius spans the whole range.
+  const ratePerPixel = (domain.max - domain.min) / OUTER_RADIUS;
   const scale = ratePerPixel * ratePerPixel;
   const px = enclosedAreas(points, zeroRadius);
   return { fast: px.fast * scale, slow: px.slow * scale, total: px.total * scale };

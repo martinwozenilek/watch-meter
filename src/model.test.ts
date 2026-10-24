@@ -83,10 +83,27 @@ describe("axisDomain", () => {
 });
 
 describe("chartDomain", () => {
+  it("rounds each side up on its own", () => {
+    expect(chartDomain(readings)).toEqual({ min: -3, max: 4 });
+  });
+
   it("includes the on-wrist value", () => {
-    expect(chartDomain(readings)).toBe(4);
-    expect(chartDomain(readings, 9)).toBe(10);
-    expect(chartDomain(readings, null)).toBe(4);
+    expect(chartDomain(readings, 9)).toEqual({ min: -3, max: 10 });
+    expect(chartDomain(readings, -5)).toEqual({ min: -5, max: 4 });
+    expect(chartDomain(readings, null)).toEqual({ min: -3, max: 4 });
+  });
+
+  it("drops the side that has no values", () => {
+    const fast = readings.map((reading) => ({ ...reading, drift: Math.abs(reading.drift) }));
+    const slow = readings.map((reading) => ({ ...reading, drift: -Math.abs(reading.drift) }));
+
+    expect(chartDomain(fast, 0)).toEqual({ min: 0, max: 4 });
+    expect(chartDomain(slow, 0)).toEqual({ min: -4, max: 0 });
+  });
+
+  it("falls back to ±1 when everything is zero", () => {
+    const flat = readings.map((reading) => ({ ...reading, drift: 0 }));
+    expect(chartDomain(flat, 0)).toEqual({ min: -1, max: 1 });
   });
 });
 
@@ -125,15 +142,23 @@ describe("orderReadings", () => {
 });
 
 describe("radialFraction", () => {
-  it("maps -domain, 0 and +domain to the centre, the zero ring and the edge", () => {
-    expect(radialFraction(-4, 4)).toBe(0);
-    expect(radialFraction(0, 4)).toBe(0.5);
-    expect(radialFraction(4, 4)).toBe(1);
+  it("maps min, 0 and max to the centre, the zero ring and the edge", () => {
+    const domain = { min: -4, max: 4 };
+    expect(radialFraction(-4, domain)).toBe(0);
+    expect(radialFraction(0, domain)).toBe(0.5);
+    expect(radialFraction(4, domain)).toBe(1);
+  });
+
+  it("puts zero off-centre when the range is lopsided", () => {
+    expect(radialFraction(0, { min: -2, max: 6 })).toBe(0.25);
+    expect(radialFraction(0, { min: 0, max: 6 })).toBe(0);
+    expect(radialFraction(0, { min: -6, max: 0 })).toBe(1);
   });
 
   it("clamps out-of-range values and guards a bad domain", () => {
-    expect(radialFraction(10, 4)).toBe(1);
-    expect(radialFraction(-10, 4)).toBe(0);
-    expect(radialFraction(1, 0)).toBe(0.5);
+    const domain = { min: -4, max: 4 };
+    expect(radialFraction(10, domain)).toBe(1);
+    expect(radialFraction(-10, domain)).toBe(0);
+    expect(radialFraction(1, { min: 0, max: 0 })).toBe(0.5);
   });
 });
