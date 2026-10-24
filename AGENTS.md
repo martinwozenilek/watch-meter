@@ -36,4 +36,4 @@ Client-only single-page app: six-position watch rate visualizer. No backend, no 
 - The zoom modal re-renders from `lastZoomData`. Update that when chart data changes or the modal shows stale content.
 - Theming is driven by `data-theme="light|dark"` on `<html>`. The inline script in `index.html` applies the stored/system theme before paint (key `watch-meter:theme`); `main.ts` handles the toggle. New colors belong in the `:root` / `[data-theme="dark"]` variable blocks, not as literals.
 - Insert user-entered text (watch names) with `textContent`, not `innerHTML`.
-- Inputs: `.rate-input` lives inside `.rate-input-wrap`; generic input styles are scoped as `.field > input` to avoid double-boxing the on-wrist field.
+- Inputs: `.rate-input` lives inside `.rate-input-wrap`; generic input styles are scoped as `.field > input` to avoid double-boxing the on-wrist field. `showRateStatus` tints the wrap via `.valid`/`.invalid` (empty or unparseable = invalid/red, parseable = valid/green; colors are the `--input-valid-*`/`--input-invalid-*` theme variables).

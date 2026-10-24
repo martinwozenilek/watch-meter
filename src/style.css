@@ -8,8 +8,8 @@
 
 :root {
   color-scheme: light;
-  --bg: radial-gradient(1200px 800px at 20% -10%, #f7f8fb 0%, #eef1f7 40%, #e7ebf5 100%);
-  --panel: rgba(255, 255, 255, 0.92);
+  --bg: radial-gradient(1200px 800px at 20% -10%, #c6cedb 0%, #b0bac9 40%, #9aa7bb 100%);
+  --panel: rgba(203, 213, 225, 0.9);
   --panel-border: rgba(15, 23, 42, 0.08);
   --text: #0f172a;
   --text-subtle: #475569;
@@ -25,6 +25,10 @@
   --surface-glass: rgba(255, 255, 255, 0.7);
   --surface-input: #ffffff;
   --input-border: rgba(15, 23, 42, 0.12);
+  --input-valid-bg: rgba(22, 163, 74, 0.1);
+  --input-valid-border: rgba(22, 163, 74, 0.4);
+  --input-invalid-bg: rgba(220, 38, 38, 0.08);
+  --input-invalid-border: rgba(220, 38, 38, 0.35);
   --inset-highlight: rgba(255, 255, 255, 0.8);
   --active-tint: rgba(37, 99, 235, 0.12);
   --focus-border: rgba(37, 99, 235, 0.6);
@@ -39,7 +43,7 @@
   --bar-fast: rgba(37, 99, 235, 0.8);
   --bar-slow: rgba(220, 38, 38, 0.8);
   --bar-flat: rgba(148, 163, 184, 0.8);
-  --modal-bg: radial-gradient(1400px 900px at 50% 50%, #f7f8fb, #e7ebf5);
+  --modal-bg: radial-gradient(1400px 900px at 50% 50%, #c6cedb, #9aa7bb);
   --toast-bg: rgba(15, 23, 42, 0.9);
   --toast-text: #ffffff;
   --brand-bg: radial-gradient(circle at top, #ffffff, #f1f5ff);
@@ -64,6 +68,10 @@
   --surface-glass: rgba(255, 255, 255, 0.04);
   --surface-input: #12161c;
   --input-border: rgba(255, 255, 255, 0.12);
+  --input-valid-bg: rgba(74, 222, 128, 0.12);
+  --input-valid-border: rgba(74, 222, 128, 0.35);
+  --input-invalid-bg: rgba(255, 129, 119, 0.12);
+  --input-invalid-border: rgba(255, 129, 119, 0.4);
   --inset-highlight: rgba(255, 255, 255, 0.06);
   --active-tint: rgba(138, 180, 255, 0.16);
   --focus-border: rgba(138, 180, 255, 0.65);
@@ -254,6 +262,16 @@ button {
   border: 1px solid var(--input-border);
   background: var(--surface-input);
   box-shadow: inset 0 1px 0 var(--inset-highlight);
+}
+
+.rate-input-wrap.valid {
+  border-color: var(--input-valid-border);
+  background: var(--input-valid-bg);
+}
+
+.rate-input-wrap.invalid {
+  border-color: var(--input-invalid-border);
+  background: var(--input-invalid-bg);
 }
 
 .rate-input {

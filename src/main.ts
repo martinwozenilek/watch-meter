@@ -208,11 +208,16 @@ function toast(message: string): void {
   toastTimer = window.setTimeout(() => toastEl.classList.remove("visible"), 1400);
 }
 
-/** Shows the format hint under a rate input when its text does not parse. */
-function showRateStatus(status: HTMLElement, raw: string): void {
-  const invalid = raw.trim() !== "" && parseRate(raw) === null;
+/** Shows the format hint under a rate input when its text does not parse, and tints the field. */
+function showRateStatus(status: HTMLElement, input: HTMLInputElement): void {
+  const parsed = parseRate(input.value);
+  const invalid = input.value.trim() !== "" && parsed === null;
   status.textContent = invalid ? RATE_HINT : "";
   status.classList.toggle("error", invalid);
+
+  const wrap = input.closest(".rate-input-wrap");
+  wrap?.classList.toggle("valid", parsed !== null);
+  wrap?.classList.toggle("invalid", parsed === null);
 }
 
 function setViewMode(mode: ViewMode): void {
@@ -237,9 +242,9 @@ function fillForm(draft: Draft): void {
 
 function refreshStatuses(): void {
   for (const position of POSITIONS) {
-    showRateStatus(fieldStatuses.get(position)!, fields.get(position)!.value);
+    showRateStatus(fieldStatuses.get(position)!, fields.get(position)!);
   }
-  showRateStatus(wristStatus, wristInput.value);
+  showRateStatus(wristStatus, wristInput);
 }
 
 function buildForm(): void {
@@ -261,7 +266,7 @@ function buildForm(): void {
     fieldStatuses.set(position, status);
 
     input.addEventListener("input", () => {
-      showRateStatus(status, input.value);
+      showRateStatus(status, input);
       persistDraft();
       updateChart();
     });
@@ -559,11 +564,12 @@ importFile.addEventListener("change", async () => {
 
 buildForm();
 restoreDraft();
+refreshStatuses();
 updateChart();
 renderHistory();
 watchName.addEventListener("input", persistDraft);
 wristInput.addEventListener("input", () => {
-  showRateStatus(wristStatus, wristInput.value);
+  showRateStatus(wristStatus, wristInput);
   persistDraft();
   updateChart();
 });
