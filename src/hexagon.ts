@@ -130,7 +130,11 @@ export interface ZoneAreas {
   total: number;
 }
 
-/** Area samples per lap. Dense enough that the chord error is invisible. */
+/**
+ * Area samples per lap. Dense enough that the chord error is invisible.
+ * Twice PROJECTION_SAMPLES, so one pass at this density can feed both the
+ * area split and the on-wrist search.
+ */
 const AREA_SAMPLES = 1440;
 
 /** Cross product of two vectors: twice the signed fan-triangle area. */
@@ -262,14 +266,21 @@ export function projectToCurve(points: Point[], targetFraction: number, tension:
   return samples ? projectionFromSamples(samples, targetFraction) : [];
 }
 
-/** The on-wrist search over a sampling pass at projection density. */
+/** The on-wrist search over a shared sampling pass. */
 function projectionFromSamples(samples: CurveSamples, targetFraction: number): Point[] {
   const { segments, xs, ys } = samples;
   const scratch = { x: 0, y: 0 };
 
+  // The pass may be denser than the search needs. Reading sample i at index
+  // i * stride hits the same curve parameter i / PROJECTION_SAMPLES, so an
+  // area-density pass (stride 2) serves the search without resampling —
+  // but the pass count must be a whole multiple of PROJECTION_SAMPLES.
+  const stride = xs.length / PROJECTION_SAMPLES;
+
   const offsets = new Float64Array(PROJECTION_SAMPLES);
   for (let i = 0; i < PROJECTION_SAMPLES; i += 1) {
-    offsets[i] = Math.sqrt(xs[i] * xs[i] + ys[i] * ys[i]) / OUTER_RADIUS - targetFraction;
+    const j = i * stride;
+    offsets[i] = Math.sqrt(xs[j] * xs[j] + ys[j] * ys[j]) / OUTER_RADIUS - targetFraction;
   }
 
   const hits: Point[] = [];
@@ -277,7 +288,8 @@ function projectionFromSamples(samples: CurveSamples, targetFraction: number): P
     const current = offsets[i];
     const next = offsets[(i + 1) % PROJECTION_SAMPLES];
     if (Math.abs(current) < 1e-9) {
-      hits.push({ x: xs[i] + CENTER, y: ys[i] + CENTER });
+      const j = i * stride;
+      hits.push({ x: xs[j] + CENTER, y: ys[j] + CENTER });
     } else if (Math.abs(next) >= 1e-9 && current * next < 0) {
       let low = i / PROJECTION_SAMPLES;
       let high = (i + 1) / PROJECTION_SAMPLES;
@@ -312,7 +324,8 @@ function projectionFromSamples(samples: CurveSamples, targetFraction: number): P
   for (let i = 1; i < PROJECTION_SAMPLES; i += 1) {
     if (Math.abs(offsets[i]) < Math.abs(offsets[best])) best = i;
   }
-  return [{ x: xs[best] + CENTER, y: ys[best] + CENTER }];
+  const bestJ = best * stride;
+  return [{ x: xs[bestJ] + CENTER, y: ys[bestJ] + CENTER }];
 }
 
 // The main chart, the zoom modal and every history thumbnail render on the
@@ -338,6 +351,18 @@ export function renderHexagon(
   const points = readings.map((reading, index) => polar(index, radiusOf(reading.drift)));
   const path = smoothClosedPath(points);
 
+  const wristValue = wristDrift ?? null;
+  const wantsAreas = options.areas !== false;
+
+  // One sampling pass feeds both the on-wrist markers and the area split.
+  // At area density (twice the projection density) the on-wrist search
+  // reads every other sample, so a wrist value costs no second pass;
+  // thumbnails skip the split, so their pass runs at projection density.
+  const samples =
+    wristValue !== null || wantsAreas
+      ? sampleCurve(points, CURVE_TENSION, wantsAreas ? AREA_SAMPLES : PROJECTION_SAMPLES)
+      : null;
+
   const summary = readings
     .map((reading) => `${positionLabel(reading.position)} ${formatRate(reading.drift)}`)
     .join(", ");
@@ -346,7 +371,7 @@ export function renderHexagon(
   const clipId = `wm-hex-clip-${clipIdCounter}`;
 
   const parts: string[] = [];
-  const wristLabel = wristDrift !== undefined && wristDrift !== null ? `, on wrist ${formatRate(wristDrift)} s/d` : "";
+  const wristLabel = wristValue !== null ? `, on wrist ${formatRate(wristValue)} s/d` : "";
   parts.push(
     `<svg viewBox="0 0 ${SIZE} ${SIZE}" role="img" aria-label="Position signature. ${summary}${wristLabel}, in seconds per day.">`,
   );
@@ -404,9 +429,9 @@ export function renderHexagon(
   }
 
   // On-wrist measurement, marked everywhere the smoothed curve reaches it.
-  if (wristDrift !== undefined && wristDrift !== null) {
-    const targetFraction = radialFraction(wristDrift, domain);
-    for (const wristPoint of projectToCurve(points, targetFraction)) {
+  if (wristValue !== null && samples) {
+    const targetFraction = radialFraction(wristValue, domain);
+    for (const wristPoint of projectionFromSamples(samples, targetFraction)) {
       parts.push(
         `<circle cx="${round(wristPoint.x)}" cy="${round(wristPoint.y)}" r="7" class="hex-wrist" />`,
       );
@@ -437,11 +462,11 @@ export function renderHexagon(
 
   parts.push("</svg>");
   host.innerHTML = parts.join("");
-  if (options.areas === false) return null;
+  if (!wantsAreas) return null;
 
   // Convert square SVG units to (s/d)²: one outer radius spans the whole range.
   const ratePerPixel = (domain.max - domain.min) / OUTER_RADIUS;
   const scale = ratePerPixel * ratePerPixel;
-  const px = enclosedAreas(points, zeroRadius);
+  const px = samples ? areasFromSamples(samples, zeroRadius) : { fast: 0, slow: 0, total: 0 };
   return { fast: px.fast * scale, slow: px.slow * scale, total: px.total * scale };
 }
