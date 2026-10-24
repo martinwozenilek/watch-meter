@@ -3,6 +3,7 @@
 - **Date:** 2026-10-24 — revised the same day after `docs/optimization-findings-review.md` and independent verification (CLAUDE.md, commit `16784fd`, and a timing re-run of the exact `hexagon.ts` math). The review's corrections and two fixes to the review itself are folded in.
 - **Scope:** full source review (`index.html`, `src/main.ts`, `src/model.ts`, `src/hexagon.ts`, `src/bars.ts`, `src/storage.ts`) plus tests
 - **Status:** findings #1–#3 implemented on branch `perf/hexagon-hot-path` (see "Implementation log" at the end); #4, #5 and the nice-to-haves remain report-only
+- **Line references:** `hexagon.ts` line numbers and names in the findings (e.g. `pointOnSmoothPath`) describe the code before the refactor, at commit `1ec3618`. The other files' line numbers are still current.
 
 ## Overall verdict
 
@@ -52,7 +53,7 @@ Beyond #1:
 
 `enclosedAreas` (1440) and `projectToCurve` (720) sample the identical curve with identical tension. A shared pass saves **a third** of the evaluations (2160 → 1440) — not half, as the first draft claimed — and only when an on-wrist value is set. Sharing is easier than it sounds: the projection points (`i/720`) are exactly every other area point (`2i/1440`), so one 1440-sample pass serves both with no resampling.
 
-Bisection steps (corrected): one sample interval spans up to ≈ 2π·142/720 ≈ **1.24 SVG units**, and `hexagon.test.ts:68` asserts `toBeCloseTo(70, 3)` (±0.0005), so ~12 steps is the safe floor (11 is borderline: ~0.0006). The saving — about 8 evaluations per crossing — is too small to justify touching the test. Keep the current 20 unless the code is being rewritten anyway.
+Bisection steps (corrected): one sample interval spans roughly 2π·142/720 ≈ **1.24 SVG units** (a rule of thumb, not a bound: the curve's speed along its parameter is not uniform). The search returns the midpoint of the final interval, so the error is half its width: 11 steps gives ~0.0003, inside the ±0.0005 of `toBeCloseTo(70, 3)` in the crossing test; 10 steps (~0.0006) is borderline. But the marker goldens (`hexagon.test.ts`, "pins the refined marker positions", 4 decimals) lock in the 20-step result, so fewer steps also means regenerating those goldens. The saving — about 9 evaluations per crossing — does not justify that. Keep 20.
 
 ### 4. Cache history thumbnails, if session counts grow (was #5)
 
@@ -60,7 +61,7 @@ Bisection steps (corrected): one sample interval spans up to ≈ 2π·142/720 �
 
 Clip-path safety (verified): the id counter only increases, so a cached string keeps an id no later render will reuse. One caveat: `loadSessions` does not dedupe ids, so a hand-edited store containing duplicate session ids would render the same cached string twice → duplicate clip-path ids in the DOM. Guard against that if implemented.
 
-Each thumbnail with a wrist value still runs the 720-sample `projectToCurve` (via `hexagon.ts:334-341`); N sessions = N×720 samples per history render — the second-heaviest path in the app with many saved sessions.
+Each thumbnail with a wrist value still runs a 720-sample `sampleCurve` pass plus the on-wrist search inside `renderHexagon` (thumbnails skip the areas, so the pass runs at `PROJECTION_SAMPLES` density); N sessions = N×720 samples per history render — the second-heaviest path in the app with many saved sessions.
 
 ### 5. Micro-deduplications (tidiness, not speed) (was #6)
 
@@ -77,7 +78,7 @@ Each thumbnail with a wrist value still runs the 720-sample `projectToCurve` (vi
 
 ## Possible, but with caveats
 
-- **Lowering `AREA_SAMPLES` (1440 → 360/720).** Safer test-wise than the first draft stated: the πr² assertion (`hexagon.test.ts:19`) is exact at any sample count — all samples sit outside the zero disk, the chords never cross it, and the sector areas telescope to exactly the disk — and `fast + slow ≈ total` holds by construction at any count. Only straddling shapes shift, and those tests use loose tolerances. Still worth a quick test run before committing.
+- **Lowering `AREA_SAMPLES` (1440 → 720).** Since #3 the shared pass requires `AREA_SAMPLES` to be a whole multiple of `PROJECTION_SAMPLES` (720): the on-wrist search reads index `i * stride` with `stride = AREA_SAMPLES / 720`. **360 is no longer an option** — the stride becomes 0.5, `xs[0.5]` is `undefined`, every offset turns NaN, no crossing is found, and the search silently falls back to sample 0: wrong markers, no error. 720 (stride 1) is safe. Test-wise: the πr² assertion (`hexagon.test.ts:19`) is exact at any sample count — all samples sit outside the zero disk, the chords never cross it, and the sector areas telescope to exactly the disk — and `fast + slow ≈ total` holds by construction. But the straddling-split goldens ("pins the straddling split", 4 decimals) depend on the sample count and must be regenerated.
 - **Debouncing the draft save** means a crash could lose the last ~200 ms of typing unless flushed on unload — easy to add, just needs doing.
 
 ## Already optimal (checked, no action needed)
@@ -112,4 +113,6 @@ Measured result (Node, median of 7 runs, example shape with an on-wrist value):
 | `projectToCurve` | ~79 µs | ~21 µs |
 | Both (per keystroke, wrist set) | ~313 µs | ~86 µs |
 
-Outputs are bit-identical to the old implementation on every tested shape (areas, markers, and the shared-pass markers vs a dedicated search); the `Math.hypot` → `Math.sqrt` swap changed nothing on any tested input. Per-keystroke math drops ~3.7×; the two `innerHTML` parses and layout are now the dominant remaining cost. #4, #5 and the nice-to-haves are still open.
+The "Before" column is a fresh run, separate from the baseline above (hence `enclosedAreas` landing just under the baseline's ~220 µs floor), and each row was timed separately, so "Both" before is not exactly the sum of the two rows above it.
+
+Outputs are bit-identical to the old implementation on every tested shape (areas, markers, and the shared-pass markers vs a dedicated search); the `Math.hypot` → `Math.sqrt` swap changed nothing on any tested input. Per-keystroke math drops ~3.6×; the two `innerHTML` parses and layout are now the dominant remaining cost. #4, #5 and the nice-to-haves are still open.

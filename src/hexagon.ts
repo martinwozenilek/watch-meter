@@ -49,7 +49,7 @@ interface CurveSegment {
 /**
  * Closed Catmull-Rom spline converted to cubic Béziers. `tension` below 1
  * tightens the curve so it stays close to the measured points. Derived once
- * and shared by `smoothClosedPath` (the drawn SVG path) and `pointOnSmoothPath`
+ * and shared by `smoothClosedPath` (the drawn SVG path) and `pointAt`
  * (the samplers), so the drawn curve, the on-wrist markers and the area
  * readout cannot drift apart.
  */
