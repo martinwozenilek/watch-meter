@@ -46,6 +46,33 @@ describe("enclosedAreas", () => {
     expect(areas.fast).toBeGreaterThan(0);
   });
 
+  it("pins the straddling split, including edges that cross the ring twice", () => {
+    const points = [
+      { x: CENTER + 80, y: CENTER },
+      { x: CENTER, y: CENTER + 20 },
+      { x: CENTER - 80, y: CENTER },
+      { x: CENTER, y: CENTER - 20 },
+    ];
+
+    // Golden values from the sampler. They depend on the AREA_SAMPLES density;
+    // a denser or sparser pass legitimately shifts them.
+    const areas = enclosedAreas(points, 40);
+    expect(areas.slow).toBeCloseTo(2783.22057, 4);
+    expect(areas.fast).toBeCloseTo(1427.70174, 4);
+    expect(areas.total).toBeCloseTo(4210.92231, 4);
+
+    // Ring 20 grazes the curve near the radius-20 points, so some sample
+    // edges cross the ring twice. Each edge's stop list must come out in
+    // ascending order: a mis-ordered list counts whole chords as inside and
+    // pushes the slow zone past the disk itself (docs/optimization-findings.md,
+    // finding 2).
+    const grazing = enclosedAreas(points, 20);
+    expect(grazing.slow).toBeLessThan(Math.PI * 20 * 20);
+    expect(grazing.slow).toBeGreaterThan(Math.PI * 20 * 20 - 0.001);
+    expect(grazing.slow).toBeCloseTo(1256.63706, 4);
+    expect(grazing.fast).toBeCloseTo(2954.28526, 4);
+  });
+
   it("returns zero areas for degenerate input", () => {
     expect(enclosedAreas([], 10)).toEqual({ fast: 0, slow: 0, total: 0 });
   });
@@ -66,6 +93,32 @@ describe("projectToCurve", () => {
 
     expect(hits).toHaveLength(6);
     for (const hit of hits) expect(radiusOf(hit)).toBeCloseTo(70, 3);
+  });
+
+  it("pins the refined marker positions", () => {
+    // Same alternating shape as the crossing test. The goldens lock where the
+    // 20-step bisection lands, in scan order; they depend on the
+    // PROJECTION_SAMPLES density, so a different count legitimately shifts them.
+    const points = Array.from({ length: 6 }, (_, index) => {
+      const angle = (-90 + index * 60) * (Math.PI / 180);
+      const radius = index % 2 === 0 ? 100 : 40;
+      return { x: CENTER + Math.cos(angle) * radius, y: CENTER + Math.sin(angle) * radius };
+    });
+    const hits = projectToCurve(points, 70 / 142);
+
+    expect(hits).toHaveLength(6);
+    const goldens: Array<[number, number]> = [
+      [256.36963, 171.94094],
+      [307.12569, 259.85301],
+      [290.75606, 288.20604],
+      [189.24394, 288.20604],
+      [172.87431, 259.85301],
+      [223.63037, 171.94094],
+    ];
+    hits.forEach((hit, index) => {
+      expect(hit.x).toBeCloseTo(goldens[index][0], 4);
+      expect(hit.y).toBeCloseTo(goldens[index][1], 4);
+    });
   });
 
   it("falls back to the nearest point when the curve never reaches the target", () => {
