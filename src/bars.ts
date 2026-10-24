@@ -1,4 +1,4 @@
-import { formatRate, positionLabel, type Reading } from "./model";
+import { driftSign, formatRate, positionLabel, type Reading } from "./model";
 
 const WIDTH = 520;
 const ROW_HEIGHT = 30;
@@ -12,12 +12,6 @@ const ZERO_X = (BAR_LEFT + BAR_RIGHT) / 2;
 const HALF_WIDTH = (BAR_RIGHT - BAR_LEFT) / 2;
 
 const round = (value: number): string => String(Math.round(value * 100) / 100);
-
-function signClass(drift: number): string {
-  if (drift > 0.005) return "fast";
-  if (drift < -0.005) return "slow";
-  return "flat";
-}
 
 export function renderBars(host: HTMLElement, readings: Reading[], domain: number): void {
   const height = TOP + readings.length * ROW_HEIGHT + BOTTOM;
@@ -44,9 +38,10 @@ export function renderBars(host: HTMLElement, readings: Reading[], domain: numbe
     const centerY = TOP + index * ROW_HEIGHT + ROW_HEIGHT / 2;
     const barTop = centerY - 7;
     const tip = xFor(reading.drift);
-    const left = Math.min(ZERO_X, tip);
-    const width = Math.max(2, Math.abs(tip - ZERO_X));
-    const barLeft = reading.drift < 0 ? left : ZERO_X - (width === 2 ? 1 : 0);
+    const length = Math.abs(tip - ZERO_X);
+    // Bars too short to see get a 2px stub centred on zero, whatever their sign.
+    const width = Math.max(2, length);
+    const barLeft = length < 2 ? ZERO_X - 1 : Math.min(ZERO_X, tip);
 
     parts.push(
       `<text x="${LABEL_WIDTH}" y="${round(centerY)}" class="bar-label" text-anchor="end" ` +
@@ -54,10 +49,10 @@ export function renderBars(host: HTMLElement, readings: Reading[], domain: numbe
     );
     parts.push(
       `<rect x="${round(barLeft)}" y="${round(barTop)}" width="${round(width)}" height="14" ` +
-        `rx="3" class="bar-fill ${signClass(reading.drift)}" />`,
+        `rx="3" class="bar-fill ${driftSign(reading.drift)}" />`,
     );
     parts.push(
-      `<text x="${WIDTH - 10}" y="${round(centerY)}" class="bar-value ${signClass(
+      `<text x="${WIDTH - 10}" y="${round(centerY)}" class="bar-value ${driftSign(
         reading.drift,
       )}" text-anchor="end" dominant-baseline="middle">${formatRate(reading.drift)}</text>`,
     );

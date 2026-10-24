@@ -64,7 +64,8 @@ export function parseRate(raw: string): number | null {
 
 /** Formats with a sign, at most two decimals, no trailing zeros. */
 export function formatRate(value: number): string {
-  const rounded = Math.round(value * 100) / 100;
+  // Round the magnitude so -2.345 and +2.345 round the same way.
+  const rounded = Math.sign(value) * (Math.round(Math.abs(value) * 100) / 100);
   if (!Number.isFinite(rounded) || Math.abs(rounded) < 0.005) return "0";
 
   const magnitude = Math.abs(rounded).toFixed(2).replace(/\.?0+$/, "");
@@ -96,6 +97,34 @@ export function axisDomain(values: number[]): number {
   const normalized = maxAbs / magnitude;
   const step = NICE_STEPS.find((candidate) => normalized <= candidate + 1e-9) ?? 10;
   return step * magnitude;
+}
+
+/** Domain for a chart: covers every reading and the on-wrist value, if any. */
+export function chartDomain(readings: Reading[], wristDrift?: number | null): number {
+  const values = readings.map((reading) => reading.drift);
+  if (wristDrift !== undefined && wristDrift !== null) values.push(wristDrift);
+  return axisDomain(values);
+}
+
+/** Fastest and slowest reading, independent of axis order. Ties keep the input order. */
+export function driftExtremes(readings: Reading[]): { fast: Reading; slow: Reading } | null {
+  if (readings.length === 0) return null;
+  let fast = readings[0];
+  let slow = readings[0];
+  for (const reading of readings) {
+    if (reading.drift > fast.drift) fast = reading;
+    if (reading.drift < slow.drift) slow = reading;
+  }
+  return { fast, slow };
+}
+
+export type DriftSign = "fast" | "slow" | "flat";
+
+/** Follows `formatRate`, so a value displayed as "0" is always flat. */
+export function driftSign(drift: number): DriftSign {
+  const formatted = formatRate(drift);
+  if (formatted === "0") return "flat";
+  return formatted.startsWith("-") ? "slow" : "fast";
 }
 
 /** 0 at the centre (−domain), 0.5 on the zero ring, 1 at the outer edge (+domain). */

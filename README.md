@@ -14,7 +14,7 @@ Everything runs in the browser. There is no backend, no account, and no chart li
 - **Fast/slow area split** — the enclosed area is split at the zero ring and shown as a share of the total plus an absolute value in (s/d)².
 - **Bar chart** — a plain signed bar fallback under the hexagon.
 - **Saved sessions** — save, reload, and delete measurements; history thumbnails reuse the same chart renderer.
-- **JSON export/import** — one file per export, merge-safe on import.
+- **JSON export/import** — one file per export; import skips sessions that are already saved (same id), so re-importing a backup adds nothing twice.
 - **Dark mode** — follows the system preference until you toggle it; the choice is remembered and applied before first paint.
 - **Zoom modal** — click the chart for a large view; close with the button, a click on the chart, or `Escape`.
 
@@ -67,7 +67,7 @@ Export produces a JSON file with this shape; import accepts it, or a bare array 
 }
 ```
 
-Rates are seconds per day. `wristDrift` is optional. Every imported session is validated first — required fields, six readings, known position names, finite numbers — and anything that fails is skipped rather than trusted.
+Rates are seconds per day. `wristDrift` is optional. Every imported session is validated first — required fields, six readings, each position exactly once, a parseable date, finite numbers — and anything that fails is skipped rather than trusted. Sessions whose `id` is already saved are skipped too.
 
 Stored locally under two keys:
 
@@ -87,7 +87,7 @@ The theme lives in `watch-meter:theme`. Clearing site data removes all three.
 | `src/bars.ts` | Signed bar chart |
 | `src/storage.ts` | `localStorage` access and session validation |
 | `src/style.css` | Theme variables and layout |
-| `src/hexagon.test.ts` | Tests for the area math |
+| `src/*.test.ts` | Vitest suites: area math, parsing/formatting/domain, session validation and import |
 
 Conventions and the domain rules that are easy to break are documented in [`AGENTS.md`](AGENTS.md).
 

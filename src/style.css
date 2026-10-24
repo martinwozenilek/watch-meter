@@ -390,6 +390,15 @@ button {
   cursor: default;
 }
 
+.chart:focus {
+  outline: none;
+}
+
+.chart:focus-visible {
+  border-radius: 18px;
+  box-shadow: 0 0 0 3px var(--focus-ring);
+}
+
 .chart-modal {
   position: fixed;
   inset: 0;
@@ -743,13 +752,18 @@ button {
   justify-content: space-between;
 }
 
-.history-readings .pos {
+.history-readings .fast {
   color: var(--fast);
   font-variant-numeric: tabular-nums;
 }
 
-.history-readings .neg {
+.history-readings .slow {
   color: var(--slow);
+  font-variant-numeric: tabular-nums;
+}
+
+.history-readings .flat {
+  color: var(--text-subtle);
   font-variant-numeric: tabular-nums;
 }
 

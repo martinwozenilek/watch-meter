@@ -6,13 +6,15 @@ import {
   parseRate,
   formatRate,
   orderReadings,
-  axisDomain,
+  chartDomain,
+  driftExtremes,
+  driftSign,
   type AxisOrder,
   type Position,
   type Reading,
   type Session,
 } from "./model";
-import { loadDraft, saveDraft, loadSessions, saveSessions, isSession } from "./storage";
+import { loadDraft, saveDraft, loadSessions, saveSessions, importSessions, type Draft } from "./storage";
 import { renderHexagon, type ZoneAreas } from "./hexagon";
 import { renderBars } from "./bars";
 
@@ -37,8 +39,11 @@ let lastZoomData: {
   readings: Reading[];
   domain: number;
   wrist: number | null;
-  areas: ZoneAreas;
+  areas: ZoneAreas | null;
 } | null = null;
+
+/** Element to refocus when the zoom modal closes. */
+let zoomOpener: HTMLElement | null = null;
 
 /** Percentage of the enclosed area that sits on one side of the zero ring. */
 function share(part: number, total: number): string {
@@ -90,21 +95,34 @@ function renderZoneAreas(host: HTMLElement, areas: ZoneAreas | null): void {
 function openZoom(): void {
   if (!lastZoomData) return;
   chartModalChart.innerHTML = "";
-  renderHexagon(chartModalChart, lastZoomData.readings, lastZoomData.domain, lastZoomData.wrist);
+  // The areas were computed for the main chart; reuse them instead of re-sampling.
+  renderHexagon(chartModalChart, lastZoomData.readings, lastZoomData.domain, lastZoomData.wrist, {
+    areas: false,
+  });
   renderZoneAreas(chartModalAreas, lastZoomData.areas);
   chartModalCaption.innerHTML = caption.innerHTML;
+  zoomOpener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
   chartModal.hidden = false;
   document.body.style.overflow = "hidden";
+  chartModalClose.focus();
 }
 
 function closeZoom(): void {
+  if (chartModal.hidden) return;
   chartModal.hidden = true;
   document.body.style.overflow = "";
+  zoomOpener?.focus();
+  zoomOpener = null;
 }
 
 chartHost.addEventListener("click", (event) => {
   const target = event.target as HTMLElement;
   if (target.closest("button, a, input")) return;
+  openZoom();
+});
+chartHost.addEventListener("keydown", (event) => {
+  if (event.key !== "Enter" && event.key !== " ") return;
+  event.preventDefault();
   openZoom();
 });
 
@@ -114,7 +132,13 @@ chartModal.addEventListener("click", (event) => {
   if (event.target === chartModal) closeZoom();
 });
 window.addEventListener("keydown", (event) => {
-  if (event.key === "Escape" && !chartModal.hidden) closeZoom();
+  if (chartModal.hidden) return;
+  if (event.key === "Escape") closeZoom();
+  // The close button is the only control in the modal; keep focus on it.
+  if (event.key === "Tab") {
+    event.preventDefault();
+    chartModalClose.focus();
+  }
 });
 const orderButtons = document.querySelectorAll<HTMLButtonElement>(".seg button[data-order]");
 const viewButtons = document.querySelectorAll<HTMLButtonElement>('.seg button[data-mode]');
@@ -169,11 +193,51 @@ type ViewMode = "measured" | "corrected";
 let viewMode: ViewMode = "measured";
 
 const fields = new Map<Position, HTMLInputElement>();
+const fieldStatuses = new Map<Position, HTMLSpanElement>();
+
+const RATE_HINT = "Use a number like +2.5 or -3";
+
+let toastTimer: number | undefined;
 
 function toast(message: string): void {
   toastEl.textContent = message;
   toastEl.classList.add("visible");
-  window.setTimeout(() => toastEl.classList.remove("visible"), 1400);
+  window.clearTimeout(toastTimer);
+  toastTimer = window.setTimeout(() => toastEl.classList.remove("visible"), 1400);
+}
+
+/** Shows the format hint under a rate input when its text does not parse. */
+function showRateStatus(status: HTMLElement, raw: string): void {
+  const invalid = raw.trim() !== "" && parseRate(raw) === null;
+  status.textContent = invalid ? RATE_HINT : "";
+  status.classList.toggle("error", invalid);
+}
+
+function setViewMode(mode: ViewMode): void {
+  viewMode = mode;
+  for (const button of viewButtons) {
+    if (!button.dataset.mode) continue;
+    const active = button.dataset.mode === mode;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-pressed", active ? "true" : "false");
+  }
+}
+
+/** Writes a complete form state into the inputs and refreshes their status lines. */
+function fillForm(draft: Draft): void {
+  watchName.value = draft.watch;
+  wristInput.value = draft.wrist ?? "";
+  for (const position of POSITIONS) {
+    fields.get(position)!.value = draft.values[position] ?? "";
+  }
+  refreshStatuses();
+}
+
+function refreshStatuses(): void {
+  for (const position of POSITIONS) {
+    showRateStatus(fieldStatuses.get(position)!, fields.get(position)!.value);
+  }
+  showRateStatus(wristStatus, wristInput.value);
 }
 
 function buildForm(): void {
@@ -183,32 +247,19 @@ function buildForm(): void {
     field.className = "rate-field";
     field.innerHTML = `
       <span class="rate-label">${positionLabel(position)}</span>
-      <div class="rate-input-wrap">
+      <span class="rate-input-wrap">
         <input class="rate-input" inputmode="decimal" autocomplete="off" spellcheck="false" placeholder="+0.0" />
         <span class="rate-unit">s/d</span>
-      </div>
+      </span>
       <span class="rate-status" aria-live="polite"></span>
     `;
     const input = field.querySelector<HTMLInputElement>(".rate-input")!;
     const status = field.querySelector<HTMLSpanElement>(".rate-status")!;
     fields.set(position, input);
+    fieldStatuses.set(position, status);
 
     input.addEventListener("input", () => {
-      const parsed = parseRate(input.value);
-      if (input.value.trim() === "") {
-        status.textContent = "";
-        status.classList.remove("error");
-        persistDraft();
-        updateChart();
-        return;
-      }
-      if (parsed === null) {
-        status.textContent = "Use a number like +2.5 or -3";
-        status.classList.add("error");
-      } else {
-        status.textContent = "";
-        status.classList.remove("error");
-      }
+      showRateStatus(status, input.value);
       persistDraft();
       updateChart();
     });
@@ -228,26 +279,21 @@ function currentReadings(): Reading[] | null {
   return readings;
 }
 
+/** Null when the field is empty or does not parse. */
 function currentWristDrift(): number | null {
-  const parsed = parseRate(wristInput.value);
-  if (wristInput.value.trim() === "") return null;
-  return parsed;
+  return parseRate(wristInput.value);
 }
 
-function updateWristStatus(): void {
-  const parsed = parseRate(wristInput.value);
-  if (wristInput.value.trim() === "") {
-    wristStatus.textContent = "";
-    wristStatus.classList.remove("error");
+function setChartInteractive(label: string | null): void {
+  if (label === null) {
+    chartHost.removeAttribute("role");
+    chartHost.removeAttribute("tabindex");
+    chartHost.removeAttribute("aria-label");
     return;
   }
-  if (parsed === null) {
-    wristStatus.textContent = "Use a number like +2.5 or -3";
-    wristStatus.classList.add("error");
-  } else {
-    wristStatus.textContent = "";
-    wristStatus.classList.remove("error");
-  }
+  chartHost.setAttribute("role", "button");
+  chartHost.tabIndex = 0;
+  chartHost.setAttribute("aria-label", `${label} Activate to enlarge.`);
 }
 
 function updateChart(): void {
@@ -257,51 +303,46 @@ function updateChart(): void {
     barsHost.innerHTML = "";
     caption.textContent = "";
     renderZoneAreas(zoneAreasEl, null);
+    setChartInteractive(null);
+    lastZoomData = null;
     return;
   }
 
   const wristDrift = currentWristDrift();
-  updateWristStatus();
 
   let chartReadings = readings;
   let wristToShow = wristDrift;
   let captionPrefix = "";
+  const corrected = viewMode === "corrected" && wristDrift !== null;
 
   if (viewMode === "corrected") {
     if (wristDrift === null) {
-      toast("Enter on-wrist drift to correct to 0");
-      viewMode = "measured";
-      for (const button of viewButtons) {
-        const active = button.dataset.mode === "measured";
-        button.classList.toggle("active", active);
-        button.setAttribute("aria-pressed", active ? "true" : "false");
-      }
-      updateChart();
-      return;
+      // Stay in corrected mode while the wrist value is being edited; show the measured shape meanwhile.
+      captionPrefix = "Enter an on-wrist drift to correct to 0 &middot; ";
+    } else {
+      const offset = -wristDrift;
+      chartReadings = readings.map((reading) => ({ position: reading.position, drift: reading.drift + offset }));
+      wristToShow = 0;
+      captionPrefix = `Corrected to 0 on wrist (offset ${formatRate(offset)} s/d) &middot; `;
     }
-    const offset = -wristDrift;
-    chartReadings = readings.map((reading) => ({ position: reading.position, drift: reading.drift + offset }));
-    wristToShow = 0;
-    captionPrefix = `Corrected to 0 on wrist (offset ${formatRate(offset)} s/d) &middot; `;
   }
 
   const ordered = orderReadings(chartReadings, axisOrder);
-  const domainValues = chartReadings.map((reading) => reading.drift);
-  if (wristToShow !== null) domainValues.push(wristToShow);
-  const domain = axisDomain(domainValues);
+  const domain = chartDomain(chartReadings, wristToShow);
   const areas = renderHexagon(chartHost, ordered, domain, wristToShow);
   renderZoneAreas(zoneAreasEl, areas);
   renderBars(barsHost, chartReadings, domain);
+  setChartInteractive(chartHost.querySelector("svg")?.getAttribute("aria-label") ?? "Position signature.");
 
   lastZoomData = { readings: ordered, domain, wrist: wristToShow, areas };
 
-  const fast = ordered[0];
-  const slow = ordered[ordered.length - 1];
+  const { fast, slow } = driftExtremes(chartReadings)!;
+  const orderText = axisOrder === "sorted" ? "Axes sorted by drift" : "Axes in position order";
   const wristText =
     wristToShow !== null
-      ? ` &middot; ${viewMode === "corrected" ? "on wrist (corrected)" : "on wrist"}: ${formatRate(wristToShow)} s/d`
+      ? ` &middot; ${corrected ? "on wrist (corrected)" : "on wrist"}: ${formatRate(wristToShow)} s/d`
       : "";
-  caption.innerHTML = `${captionPrefix}Axes sorted by drift &middot; most fast: ${positionLabel(
+  caption.innerHTML = `${captionPrefix}${orderText} &middot; most fast: ${positionLabel(
     fast.position,
   )} ${formatRate(fast.drift)} &middot; most slow: ${positionLabel(
     slow.position,
@@ -318,33 +359,7 @@ function persistDraft(): void {
 
 function restoreDraft(): void {
   const draft = loadDraft();
-  if (!draft) return;
-  watchName.value = draft.watch;
-  if (typeof draft.wrist === "string") {
-    wristInput.value = draft.wrist;
-  }
-  for (const position of POSITIONS) {
-    const value = draft.values?.[position];
-    if (value !== undefined) fields.get(position)!.value = value;
-  }
-  for (const position of POSITIONS) {
-    const input = fields.get(position)!;
-    const parsed = parseRate(input.value);
-    const status = input.parentElement!.parentElement!.querySelector<HTMLSpanElement>(".rate-status")!;
-    if (input.value.trim() === "") {
-      status.textContent = "";
-      status.classList.remove("error");
-      continue;
-    }
-    if (parsed === null) {
-      status.textContent = "Use a number like +2.5 or -3";
-      status.classList.add("error");
-    } else {
-      status.textContent = "";
-      status.classList.remove("error");
-    }
-  }
-  updateWristStatus();
+  if (draft) fillForm(draft);
 }
 
 function renderHistory(): void {
@@ -359,7 +374,9 @@ function renderHistory(): void {
 
   for (const session of sessions) {
     const ordered = orderReadings(session.readings, "sorted");
-    const domain = axisDomain(ordered.map((reading) => reading.drift));
+    const wristDrift = session.wristDrift ?? null;
+    // Same domain rule as the main chart, so a loaded session looks identical there.
+    const domain = chartDomain(session.readings, wristDrift);
     const item = document.createElement("li");
     item.className = "history-item";
 
@@ -374,7 +391,7 @@ function renderHistory(): void {
 
     const mini = document.createElement("div");
     mini.className = "history-mini";
-    renderHexagon(mini, ordered, domain, session.wristDrift ?? null);
+    renderHexagon(mini, ordered, domain, wristDrift, { areas: false });
     mini.style.width = "180px";
     mini.style.height = "180px";
 
@@ -382,9 +399,9 @@ function renderHistory(): void {
     list.className = "history-readings";
     for (const reading of ordered) {
       const li = document.createElement("li");
-      li.innerHTML = `<span>${positionLabel(reading.position)}</span><span class="${reading.drift >= 0 ? "pos" : "neg"}">${formatRate(
+      li.innerHTML = `<span>${positionLabel(reading.position)}</span><span class="${driftSign(
         reading.drift,
-      )}</span>`;
+      )}">${formatRate(reading.drift)}</span>`;
       list.appendChild(li);
     }
 
@@ -395,27 +412,10 @@ function renderHistory(): void {
     load.type = "button";
     load.textContent = "Load";
     load.addEventListener("click", () => {
-      for (const reading of session.readings) {
-        const input = fields.get(reading.position)!;
-        input.value = String(reading.drift);
-        const status = input.parentElement!.parentElement!.querySelector<HTMLSpanElement>(".rate-status")!;
-        status.textContent = "";
-        status.classList.remove("error");
-      }
-      watchName.value = session.watch;
-      if (session.wristDrift !== undefined && session.wristDrift !== null) {
-        wristInput.value = String(session.wristDrift);
-      } else {
-        wristInput.value = "";
-      }
-      updateWristStatus();
-      viewMode = "measured";
-      for (const b of viewButtons) {
-        if (!b.dataset.mode) continue;
-        const active = b.dataset.mode === "measured";
-        b.classList.toggle("active", active);
-        b.setAttribute("aria-pressed", active ? "true" : "false");
-      }
+      const values = {} as Record<Position, string>;
+      for (const reading of session.readings) values[reading.position] = String(reading.drift);
+      fillForm({ watch: session.watch, values, wrist: wristDrift === null ? "" : String(wristDrift) });
+      setViewMode("measured");
       persistDraft();
       updateChart();
       window.scrollTo({ top: 0, behavior: "smooth" });
@@ -445,6 +445,10 @@ saveButton.addEventListener("click", () => {
     return;
   }
   const wristDrift = currentWristDrift();
+  if (wristDrift === null && wristInput.value.trim() !== "") {
+    toast("Fix the on-wrist value or clear it first");
+    return;
+  }
   const session: Session = {
     id: crypto.randomUUID(),
     watch: watchName.value,
@@ -459,41 +463,25 @@ saveButton.addEventListener("click", () => {
 });
 
 exampleButton.addEventListener("click", () => {
-  const example: Record<Position, number> = {
-    dialDown: -1.2,
-    dialUp: +0.8,
-    "12up": +3.4,
-    "3up": +1.6,
-    "6up": -2.7,
-    "9up": +2.1,
-  };
-  for (const position of POSITIONS) {
-    const input = fields.get(position)!;
-    input.value = String(example[position]);
-    const status = input.parentElement!.parentElement!.querySelector<HTMLSpanElement>(".rate-status")!;
-    status.textContent = "";
-    status.classList.remove("error");
-  }
-  watchName.value = "Example watch";
-  wristInput.value = "+1.8";
-  updateWristStatus();
+  fillForm({
+    watch: "Example watch",
+    values: {
+      dialDown: "-1.2",
+      dialUp: "+0.8",
+      "12up": "+3.4",
+      "3up": "+1.6",
+      "6up": "-2.7",
+      "9up": "+2.1",
+    },
+    wrist: "+1.8",
+  });
   persistDraft();
   updateChart();
   toast("Example loaded");
 });
 
 resetButton.addEventListener("click", () => {
-  for (const position of POSITIONS) {
-    fields.get(position)!.value = "";
-    const input = fields.get(position)!;
-    const status = input.parentElement!.parentElement!.querySelector<HTMLSpanElement>(".rate-status")!;
-    status.textContent = "";
-    status.classList.remove("error");
-  }
-  watchName.value = "";
-  wristInput.value = "";
-  wristStatus.textContent = "";
-  wristStatus.classList.remove("error");
+  fillForm({ watch: "", values: {} as Record<Position, string>, wrist: "" });
   persistDraft();
   updateChart();
   toast("Cleared");
@@ -517,14 +505,11 @@ for (const button of orderButtons) {
 for (const button of viewButtons) {
   if (!button.dataset.mode) continue;
   button.addEventListener("click", () => {
-    for (const b of viewButtons) {
-      if (!b.dataset.mode) continue;
-      b.classList.remove("active");
-      b.setAttribute("aria-pressed", "false");
+    const mode = button.dataset.mode as ViewMode;
+    setViewMode(mode);
+    if (mode === "corrected" && currentWristDrift() === null) {
+      toast("Enter on-wrist drift to correct to 0");
     }
-    button.classList.add("active");
-    button.setAttribute("aria-pressed", "true");
-    viewMode = button.dataset.mode as ViewMode;
     updateChart();
   });
 }
@@ -540,7 +525,8 @@ exportButton.addEventListener("click", () => {
   document.body.appendChild(link);
   link.click();
   document.body.removeChild(link);
-  URL.revokeObjectURL(url);
+  // Revoking synchronously can cancel the download in some browsers.
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 });
 
 importButton.addEventListener("click", () => importFile.click());
@@ -548,27 +534,17 @@ importFile.addEventListener("change", async () => {
   const file = importFile.files?.[0];
   if (!file) return;
   try {
-    const text = await file.text();
-    const parsed: unknown = JSON.parse(text);
-    const incoming = Array.isArray(parsed)
-      ? parsed
-      : parsed && typeof parsed === "object" && Array.isArray((parsed as { sessions?: unknown }).sessions)
-        ? (parsed as { sessions: unknown[] }).sessions
-        : [];
-
-    let added = 0;
-    for (const candidate of incoming) {
-      if (isSession(candidate)) {
-        // avoid exact id collisions by re-issuing ids only if present? keep id if unique
-        const exists = sessions.some((session) => session.id === candidate.id);
-        sessions.push(exists ? { ...candidate, id: crypto.randomUUID() } : candidate);
-        added += 1;
-      }
-    }
-    sessions.sort((a, b) => Date.parse(b.measuredAt) - Date.parse(a.measuredAt));
+    const parsed: unknown = JSON.parse(await file.text());
+    const result = importSessions(sessions, parsed);
+    sessions = result.sessions;
     saveSessions(sessions);
     renderHistory();
-    toast(`Imported ${added} session${added === 1 ? "" : "s"}`);
+
+    const notes: string[] = [];
+    if (result.duplicates > 0) notes.push(`${result.duplicates} already saved`);
+    if (result.invalid > 0) notes.push(`${result.invalid} invalid`);
+    const suffix = notes.length > 0 ? ` · skipped ${notes.join(", ")}` : "";
+    toast(`Imported ${result.added} session${result.added === 1 ? "" : "s"}${suffix}`);
   } catch {
     toast("Import failed");
   } finally {
@@ -582,7 +558,7 @@ updateChart();
 renderHistory();
 watchName.addEventListener("input", persistDraft);
 wristInput.addEventListener("input", () => {
-  updateWristStatus();
+  showRateStatus(wristStatus, wristInput.value);
   persistDraft();
   updateChart();
 });

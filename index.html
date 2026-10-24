@@ -80,10 +80,10 @@
             </label>
             <label class="field" for="wrist-drift">
               <span>On wrist (daily wear)</span>
-              <div class="rate-input-wrap">
+              <span class="rate-input-wrap">
                 <input id="wrist-drift" class="rate-input" inputmode="decimal" autocomplete="off" spellcheck="false" placeholder="+0.0" />
                 <span class="rate-unit">s/d</span>
-              </div>
+              </span>
               <span id="wrist-status" class="rate-status" aria-live="polite"></span>
             </label>
             <div class="button-row">
@@ -144,7 +144,7 @@
 
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
-    <div id="chart-modal" class="chart-modal" hidden>
+    <div id="chart-modal" class="chart-modal" role="dialog" aria-modal="true" aria-label="Enlarged position signature" hidden>
       <button id="chart-modal-close" class="chart-modal-close" type="button">Close</button>
       <div class="chart-modal-content">
         <div id="chart-modal-chart" class="chart-modal-chart"></div>

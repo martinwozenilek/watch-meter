@@ -1,4 +1,5 @@
 import {
+  driftSign,
   formatRate,
   positionLabel,
   radialFraction,
@@ -23,12 +24,6 @@ function polar(index: number, radius: number): Point {
     x: CENTER + Math.cos(angle) * radius,
     y: CENTER + Math.sin(angle) * radius,
   };
-}
-
-function signClass(drift: number): string {
-  if (drift > 0.005) return "fast";
-  if (drift < -0.005) return "slow";
-  return "flat";
 }
 
 /**
@@ -216,12 +211,18 @@ const TICK_FRACTIONS = [-0.5, 0, 0.5, 1];
 // same page, so each SVG needs its own clip-path id.
 let clipIdCounter = 0;
 
+export interface RenderHexagonOptions {
+  /** Compute the fast/slow area split. Thumbnails skip it; it is the costly part. */
+  areas?: boolean;
+}
+
 export function renderHexagon(
   host: HTMLElement,
   readings: Reading[],
   domain: number,
   wristDrift?: number | null,
-): ZoneAreas {
+  options: RenderHexagonOptions = {},
+): ZoneAreas | null {
   const radiusOf = (drift: number): number =>
     Math.min(OUTER_RADIUS, Math.max(0, radialFraction(drift, domain) * OUTER_RADIUS));
 
@@ -302,7 +303,7 @@ export function renderHexagon(
       const wristAnchorX = wristPoint.x + (wristPoint.x - CENTER) * 0.18;
       const wristAnchorY = wristPoint.y + (wristPoint.y - CENTER) * 0.18;
       parts.push(
-        `<text x="${round(wristAnchorX)}" y="${round(wristAnchorY)}" class="hex-wrist-label ${signClass(
+        `<text x="${round(wristAnchorX)}" y="${round(wristAnchorY)}" class="hex-wrist-label ${driftSign(
           wristDrift,
         )}" text-anchor="middle" dominant-baseline="middle">` +
           `on wrist ${formatRate(wristDrift)}</text>`,
@@ -325,7 +326,7 @@ export function renderHexagon(
       `<text x="${round(anchorPoint.x)}" y="${round(anchorPoint.y)}" class="hex-label" ` +
         `text-anchor="${anchor}" dominant-baseline="middle">` +
         `<tspan x="${round(anchorPoint.x)}" dy="-0.15em">${positionLabel(reading.position)}</tspan>` +
-        `<tspan x="${round(anchorPoint.x)}" dy="1.18em" class="hex-value ${signClass(
+        `<tspan x="${round(anchorPoint.x)}" dy="1.18em" class="hex-value ${driftSign(
           reading.drift,
         )}">${formatRate(reading.drift)}</tspan>` +
         `</text>`,
@@ -334,6 +335,7 @@ export function renderHexagon(
 
   parts.push("</svg>");
   host.innerHTML = parts.join("");
+  if (options.areas === false) return null;
 
   // Convert square SVG units to (s/d)²: one outer radius spans 2 × domain.
   const ratePerPixel = (2 * domain) / OUTER_RADIUS;

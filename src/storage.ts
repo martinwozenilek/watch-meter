@@ -1,4 +1,4 @@
-import { isPosition, type Position, type Session } from "./model";
+import { POSITIONS, isPosition, type Position, type Session } from "./model";
 
 const SESSIONS_KEY = "watch-meter:sessions:v1";
 const DRAFT_KEY = "watch-meter:draft:v1";
@@ -15,7 +15,8 @@ export function isSession(value: unknown): value is Session {
   if (typeof session.id !== "string") return false;
   if (typeof session.watch !== "string") return false;
   if (typeof session.measuredAt !== "string") return false;
-  if (!Array.isArray(session.readings) || session.readings.length !== 6) return false;
+  if (!Number.isFinite(Date.parse(session.measuredAt))) return false;
+  if (!Array.isArray(session.readings) || session.readings.length !== POSITIONS.length) return false;
 
   const readingsOk = session.readings.every(
     (reading) =>
@@ -27,6 +28,10 @@ export function isSession(value: unknown): value is Session {
   );
   if (!readingsOk) return false;
 
+  // Each position exactly once; otherwise loading leaves some inputs stale.
+  const positions = new Set(session.readings.map((reading) => reading.position));
+  if (positions.size !== POSITIONS.length) return false;
+
   if (session.wristDrift !== undefined && session.wristDrift !== null) {
     if (typeof session.wristDrift !== "number" || !Number.isFinite(session.wristDrift)) {
       return false;
@@ -36,8 +41,48 @@ export function isSession(value: unknown): value is Session {
   return true;
 }
 
-function newestFirst(a: Session, b: Session): number {
+export function newestFirst(a: Session, b: Session): number {
   return Date.parse(b.measuredAt) - Date.parse(a.measuredAt);
+}
+
+export interface ImportResult {
+  sessions: Session[];
+  added: number;
+  /** Already present (same id) or listed twice in the file. */
+  duplicates: number;
+  /** Failed `isSession`. */
+  invalid: number;
+}
+
+/**
+ * Accepts an export (`{ sessions: [...] }`) or a bare array. Sessions whose
+ * id is already known are skipped, so re-importing a backup changes nothing.
+ */
+export function importSessions(existing: Session[], parsed: unknown): ImportResult {
+  const incoming: unknown[] = Array.isArray(parsed)
+    ? parsed
+    : parsed && typeof parsed === "object" && Array.isArray((parsed as { sessions?: unknown }).sessions)
+      ? (parsed as { sessions: unknown[] }).sessions
+      : [];
+
+  const known = new Set(existing.map((session) => session.id));
+  const sessions = [...existing];
+  let added = 0;
+  let duplicates = 0;
+  let invalid = 0;
+  for (const candidate of incoming) {
+    if (!isSession(candidate)) {
+      invalid += 1;
+    } else if (known.has(candidate.id)) {
+      duplicates += 1;
+    } else {
+      known.add(candidate.id);
+      sessions.push(candidate);
+      added += 1;
+    }
+  }
+  sessions.sort(newestFirst);
+  return { sessions, added, duplicates, invalid };
 }
 
 export function loadSessions(): Session[] {
