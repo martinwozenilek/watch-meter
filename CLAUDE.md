@@ -12,7 +12,7 @@ The project conventions, layout, domain rules and gotchas live in `AGENTS.md` an
 
 - Single test file: `npx vitest run src/hexagon.test.ts`; single test by name: `npx vitest run -t "splits symmetrically"`.
 - `npm run preview` serves the built `dist/`.
-- No `vite.config` or `vitest.config`; both run on defaults. `tsconfig.json` is strict with `noUnusedLocals`/`noUnusedParameters`, so `npm run build` fails on unused code.
+- `vite.config.ts` only sets `base: "./"` (relative asset URLs, needed for GitHub Pages sub-path hosting); there is no `vitest.config`, so Vitest runs on defaults. `tsconfig.json` is strict with `noUnusedLocals`/`noUnusedParameters`, so `npm run build` fails on unused code.
 - Tests: `hexagon.test.ts` (area math), `model.test.ts` (parse/format/domain/order), `storage.test.ts` (`isSession`, `importSessions`). Vitest runs in Node, so DOM code in `main.ts` is untested; put testable logic in `model.ts`, `storage.ts` or `hexagon.ts`.
 
 ### How the pieces connect
